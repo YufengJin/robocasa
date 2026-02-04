@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  robocasa:
+    container_name: robocasa_container
+    image: ${IMAGE:-robocasa:latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    network_mode: host
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # - /home/yjin/repos/robocasa/datasets:/workspace/robocasa/datasets
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - GPU=${GPU:-all}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
