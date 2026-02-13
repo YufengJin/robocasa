@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package policy_service;
+
+// PolicyService defines the gRPC interface between the environment (client)
+// and the policy (server). This decouples simulation from inference so they
+// can run in separate containers / processes.
+service PolicyService {
+  // Reset is called at the start of each episode so the server can prepare
+  // for a new rollout (e.g. store the action spec for random sampling).
+  rpc Reset(ResetRequest) returns (ResetResponse);
+
+  // GetAction is called every timestep. The client sends the current
+  // observation and the server returns the action to execute.
+  rpc GetAction(ObservationRequest) returns (ActionResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Reset
+// ---------------------------------------------------------------------------
+message ResetRequest {
+  string task_name = 1;            // RoboCasa task name, e.g. "PnPCounterToCab"
+  string task_description = 2;     // Natural-language task instruction
+  int32  action_dim = 3;           // Dimensionality of the action vector
+  repeated float action_low = 4;   // Lower bound of action spec (length = action_dim)
+  repeated float action_high = 5;  // Upper bound of action spec (length = action_dim)
+}
+
+message ResetResponse {
+  bool success = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetAction
+// ---------------------------------------------------------------------------
+message ObservationRequest {
+  // Images are JPEG-encoded bytes for efficient transport.
+  bytes primary_image = 1;         // Left third-person camera (robot0_agentview_left)
+  bytes secondary_image = 2;       // Right third-person camera (robot0_agentview_right)
+  bytes wrist_image = 3;           // Wrist / eye-in-hand camera
+
+  repeated float proprio = 4;      // Proprioceptive state (gripper_qpos + eef_pos + eef_quat)
+  string task_description = 5;     // Natural-language task instruction
+
+  int32 image_height = 6;          // Original image height before JPEG encoding
+  int32 image_width = 7;           // Original image width  before JPEG encoding
+}
+
+message ActionResponse {
+  repeated float action = 1;       // Action vector returned by the policy
+}

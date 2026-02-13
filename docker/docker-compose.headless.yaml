@@ -9,8 +9,8 @@ services:
       dockerfile: docker/Dockerfile
     network_mode: host
     volumes:
-      - /home/yjin/repos/robocasa/datasets:/workspace/robocasa/datasets
-      - /home/yjin/repos/r3m:/workspace/r3m
+      - ../:/workspace
+      # - /home/yjin/repos/robocasa/datasets:/workspace/datasets
     working_dir: /workspace
     stdin_open: true
     tty: true

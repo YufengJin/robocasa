@@ -146,3 +146,8 @@ robocasa/models/assets/generative_textures
 
 # IDE
 .vscode/
+
+.vscode/
+.cursor/
+
+.eval_logs/

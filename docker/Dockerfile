@@ -61,44 +61,19 @@ RUN micromamba run -n robocasa python -m pip install torch==2.4.0 \
     --index-url https://download.pytorch.org/whl/cu118
 
 # ---------------------------------------------------------
-# Set up workspace directory
+# Install robosuite v1.5.2 to /opt/third_party/ (required dependency)
 # ---------------------------------------------------------
-WORKDIR /workspace
-
-# ---------------------------------------------------------
-# Install robosuite v1.5.2 (required dependency)
-# Clone to /workspace/robosuite and keep source code
-# ---------------------------------------------------------
-RUN micromamba run -n robocasa bash -c "\
-    git clone https://github.com/ARISE-Initiative/robosuite.git /workspace/robosuite && \
-    cd /workspace/robosuite && \
+RUN mkdir -p /opt/third_party && \
+    micromamba run -n robocasa bash -c "\
+    git clone https://github.com/ARISE-Initiative/robosuite.git /opt/third_party/robosuite && \
+    cd /opt/third_party/robosuite && \
     git checkout v1.5.2 && \
     pip install -e ."
 
 # ---------------------------------------------------------
-# Clone and install RoboCasa
-# Clone to /workspace/robocasa and keep source code
-# Note: robocasa requires mujoco==3.2.6, so we install it after robosuite
+# Set up workspace directory (robocasa installed in entrypoint for in-container dev)
 # ---------------------------------------------------------
-RUN micromamba run -n robocasa bash -c "\
-    git clone https://github.com/robocasa/robocasa.git /workspace/robocasa && \
-    cd /workspace/robocasa && \
-    pip install -e ."
-
-# ---------------------------------------------------------
-# Optional: Install pre-commit and set up code formatter
-# ---------------------------------------------------------
-# RUN micromamba run -n robocasa bash -c "\
-#     cd /workspace/robocasa && \
-#     pip install pre-commit && \
-#     pre-commit install"
-
-# ---------------------------------------------------------
-# Download kitchen assets and set up macros
-# Use yes command to provide non-interactive input for all prompts
-# ---------------------------------------------------------
-RUN yes | micromamba run -n robocasa python /workspace/robocasa/robocasa/scripts/download_kitchen_assets.py
-RUN micromamba run -n robocasa python /workspace/robocasa/robocasa/scripts/setup_macros.py
+WORKDIR /workspace
 
 # ---------------------------------------------------------
 # Entrypoint
