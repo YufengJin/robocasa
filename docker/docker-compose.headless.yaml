@@ -16,6 +16,7 @@ services:
     tty: true
     environment:
       - GPU=${GPU:-all}
+    command: tail -f /dev/null
     deploy:
       resources:
         reservations:

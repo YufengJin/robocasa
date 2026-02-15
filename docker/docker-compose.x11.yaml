@@ -19,6 +19,7 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - GPU=${GPU:-all}
+    command: tail -f /dev/null
     deploy:
       resources:
         reservations:
