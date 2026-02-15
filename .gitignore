@@ -151,3 +151,4 @@ robocasa/models/assets/generative_textures
 .cursor/
 
 .eval_logs/
+eval_logs/

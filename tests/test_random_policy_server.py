@@ -7,7 +7,7 @@ sampled from the action spec provided by the client during Reset.
 Useful for smoke-testing the gRPC eval pipeline.
 
 Usage:
-    python tests/test_random_policy_server.py --port 50052
+    python tests/test_random_policy_server.py --port 50051
 """
 
 import argparse
@@ -131,7 +131,7 @@ def main():
         description="Random-action policy gRPC server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--port", type=int, default=50052,
+    parser.add_argument("--port", type=int, default=50051,
                         help="Port to listen on")
     parser.add_argument("--host", type=str, default="127.0.0.1",
                         help="Host to bind (127.0.0.1=local only; 0.0.0.0=all interfaces)")
