@@ -461,14 +461,15 @@ def main():
     channel = grpc.insecure_channel(args.policy_server_addr, options=options)
     stub = policy_service_pb2_grpc.PolicyServiceStub(channel)
 
-    # ── Graceful shutdown on kill / Ctrl+C ──────────────────────────────
+    # ── Graceful shutdown on Ctrl+C / kill / docker stop ─────────────────
     def _cleanup(signum=None, frame=None):
-        print("\nCleaning up gRPC channel …")
+        print("\nCleaning up gRPC channel …", flush=True)
         channel.close()
         if not log_file.closed:
             log_file.close()
-        if signum is not None:
-            sys.exit(1)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1 if signum else 0)  # Force exit, avoids hang in Docker/Cursor
 
     signal.signal(signal.SIGINT, _cleanup)
     signal.signal(signal.SIGTERM, _cleanup)

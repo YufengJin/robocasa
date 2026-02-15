@@ -84,16 +84,19 @@ class RandomPolicyServicer(policy_service_pb2_grpc.PolicyServiceServicer):
 
 
 def _graceful_shutdown(signum=None, frame=None):
-    """Stop the gRPC server so the port is released immediately."""
+    """Stop the gRPC server and release the port. Waits for full shutdown before exit."""
     global _server
     if _server is not None:
-        print(f"\nReceived signal {signum}, shutting down server …")
-        _server.stop(grace=0)  # grace=0 → stop accepting, finish in-flight, release port NOW
+        print(f"\nReceived signal {signum}, shutting down server …", flush=True)
+        # stop() returns a threading.Event; wait() ensures port is released before we exit
+        stop_event = _server.stop(grace=0)
+        stop_event.wait(timeout=5)  # grace=0 → stop immediately, wait for port release
         _server = None
-        print("Server stopped, port released.")
-    # If called from a signal, exit explicitly so the process doesn't linger
-    if signum is not None:
-        sys.exit(0)
+        print("Server stopped, port released.", flush=True)
+    # Force exit without running atexit/thread join—avoids hang in Docker/Cursor
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 def serve(port: int, host: str = "127.0.0.1", max_workers: int = 4):
@@ -118,10 +121,10 @@ def serve(port: int, host: str = "127.0.0.1", max_workers: int = 4):
     print(f"Random-action policy server listening on {bind_addr}")
     print("Press Ctrl+C to stop.\n")
 
-    # Register cleanup for every possible exit path
-    signal.signal(signal.SIGINT, _graceful_shutdown)   # Ctrl+C
-    signal.signal(signal.SIGTERM, _graceful_shutdown)   # kill / docker stop
-    atexit.register(_graceful_shutdown)                  # normal Python exit
+    # Register cleanup: Ctrl+C, kill, docker stop, normal exit
+    signal.signal(signal.SIGINT, _graceful_shutdown)
+    signal.signal(signal.SIGTERM, _graceful_shutdown)
+    atexit.register(_graceful_shutdown)
 
     _server.wait_for_termination()
 
