@@ -28,7 +28,7 @@ _WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _WORKSPACE_ROOT not in sys.path:
     sys.path.insert(0, _WORKSPACE_ROOT)
 
-from robocasa.grpc import policy_service_pb2, policy_service_pb2_grpc  # noqa: E402
+from policy_bridge.grpc.robocasa import policy_service_pb2, policy_service_pb2_grpc  # noqa: E402
 
 # Global reference so signal handlers can reach it
 _server = None

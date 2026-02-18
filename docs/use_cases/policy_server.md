@@ -1,6 +1,6 @@
 # Policy to PolicyServer Guide
 
-This guide explains how to wrap any policy object into a gRPC PolicyService server for evaluation. Reference implementations: `robocasa/grpc/`, `tests/test_random_policy_server.py`, and `scripts/run_eval.py`.
+This guide explains how to wrap any policy object into a gRPC PolicyService server for evaluation. Reference implementations: `policy_bridge.grpc.robocasa`, `tests/test_random_policy_server.py`, and `scripts/run_eval.py`.
 
 ## 1. gRPC Interface Contract
 
@@ -12,7 +12,7 @@ This guide explains how to wrap any policy object into a gRPC PolicyService serv
 Implement a class that inherits `policy_service_pb2_grpc.PolicyServiceServicer` and implements `Reset` and `GetAction`:
 
 ```python
-from robocasa.grpc import policy_service_pb2, policy_service_pb2_grpc
+from policy_bridge.grpc.robocasa import policy_service_pb2, policy_service_pb2_grpc
 
 class MyPolicyServicer(policy_service_pb2_grpc.PolicyServiceServicer):
     def __init__(self):

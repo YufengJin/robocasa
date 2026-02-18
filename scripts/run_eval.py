@@ -46,7 +46,7 @@ _WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _WORKSPACE_ROOT not in sys.path:
     sys.path.insert(0, _WORKSPACE_ROOT)
 
-from robocasa.grpc import policy_service_pb2, policy_service_pb2_grpc  # noqa: E402
+from policy_bridge.grpc.robocasa import policy_service_pb2, policy_service_pb2_grpc  # noqa: E402
 from robocasa.utils.dataset_registry import (  # noqa: E402
     MULTI_STAGE_TASK_DATASETS,
     SINGLE_STAGE_TASK_DATASETS,
@@ -278,9 +278,11 @@ def run_episode(args, env, task_description, stub, episode_idx, log_file=None):
         if t % 50 == 0:
             log(f"  t={t}: action query {query_time:.3f}s, action[:4]={action[:4]}", log_file)
 
-        # Pad 7-dim policy action to 12-dim env action if needed
-        if action.shape[-1] == 7 and env.action_dim == 12:
-            mobile_base = np.array([0.0, 0.0, 0.0, 0.0, -1.0])
+        # Extend 7D policy output to env.action_dim (e.g. 11 or 12 for PandaMobile)
+        if action.shape[-1] == 7 and env.action_dim > 7:
+            pad_dim = env.action_dim - 7
+            mobile_base = np.zeros(pad_dim, dtype=np.float64)
+            mobile_base[-1] = -1.0  # last dim -1 often means "hold" for mobile base
             action = np.concatenate([action, mobile_base])
 
         obs, reward, done, info = env.step(action)
