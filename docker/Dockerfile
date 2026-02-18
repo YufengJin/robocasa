@@ -68,7 +68,9 @@ RUN micromamba run -n robocasa python -m pip install torch==2.4.0 \
 RUN micromamba run -n robocasa python -m pip install \
     "grpcio>=1.60.0" \
     "grpcio-tools>=1.60.0" \
-    "protobuf>=5.29.0"
+    "protobuf>=5.29.0" 
+
+RUN micromamba run -n robocasa python -m pip install "imageio[ffmpeg]" 
 
 # ---------------------------------------------------------
 # Install robosuite v1.5.2 to /opt/third_party/ (required dependency)

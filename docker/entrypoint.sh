@@ -9,7 +9,7 @@ if [ -f /workspace/setup.py ]; then
   micromamba run -n robocasa pip install -e .
   # tianshou pins protobuf~=3.19, but gRPC policy_service_pb2.py needs protobuf>=5.29 (runtime_version)
   echo "Ensuring protobuf>=5.29 for gRPC policy service..."
-  micromamba run -n robocasa pip install "protobuf>=5.29.0"
+  micromamba run -n robocasa pip install "protobuf>=5.29.0" 
 fi
 
 # Kitchen assets: download only when not cached (under robocasa, so volume/rebuild keeps them)
