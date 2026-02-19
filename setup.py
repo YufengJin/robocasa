@@ -31,6 +31,7 @@ setup(
         "lxml",
         "hidapi",
         "tianshou==0.4.10",
+        "policy-websocket @ git+https://github.com/YufengJin/policy_websocket.git",
     ],
     eager_resources=["*"],
     include_package_data=True,

@@ -62,13 +62,6 @@ RUN micromamba run -n robocasa python -m pip install torch==2.4.0 \
     torchaudio==2.4.0 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# ---------------------------------------------------------
-# Install gRPC and protobuf (policy service)
-# ---------------------------------------------------------
-RUN micromamba run -n robocasa python -m pip install \
-    "grpcio>=1.60.0" \
-    "grpcio-tools>=1.60.0" \
-    "protobuf>=5.29.0" 
 
 RUN micromamba run -n robocasa python -m pip install "imageio[ffmpeg]" 
 

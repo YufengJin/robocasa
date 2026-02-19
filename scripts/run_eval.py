@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-run_eval.py — RoboCasa evaluation client (gRPC).
+run_eval.py — RoboCasa evaluation client (WebSocket).
 
 Runs the RoboCasa simulation loop and delegates action inference to a remote
-Policy Server over gRPC.  This cleanly decouples environment execution from
-policy inference so they can live in separate containers / processes.
+Policy Server over WebSocket.  This cleanly decouples environment execution
+from policy inference so they can live in separate containers / processes.
 
 Usage:
     # Start the policy server first (e.g. the random-action test server):
-    python tests/test_random_policy_server.py --port 50051
+    python tests/test_random_policy_server.py --port 8000
 
     # Then run the evaluation client:
     python scripts/run_eval.py \
@@ -16,7 +16,7 @@ Usage:
         --num_trials 5 \
         --policy randomPolicy \
         --seed 195 \
-        --policy_server_addr localhost:50051
+        --policy_server_addr localhost:8000
 
     Logs and videos are written to: <log_dir>/<task_name>--<YYYYMMDD_HHMMSS>/
 """
@@ -31,23 +31,13 @@ import sys
 import time
 from datetime import datetime
 
-import cv2
-import grpc
 import imageio
 import numpy as np
 import robosuite
 from robosuite.controllers import load_composite_controller_config
 
-# ---------------------------------------------------------------------------
-# Make sure the workspace root is on sys.path so that the generated gRPC stubs
-# under robocasa/grpc/ can be imported.
-# ---------------------------------------------------------------------------
-_WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _WORKSPACE_ROOT not in sys.path:
-    sys.path.insert(0, _WORKSPACE_ROOT)
-
-from policy_bridge.grpc.robocasa import policy_service_pb2, policy_service_pb2_grpc  # noqa: E402
-from robocasa.utils.dataset_registry import (  # noqa: E402
+from policy_websocket import WebsocketClientPolicy
+from robocasa.utils.dataset_registry import (
     MULTI_STAGE_TASK_DATASETS,
     SINGLE_STAGE_TASK_DATASETS,
 )
@@ -91,16 +81,6 @@ def log(msg: str, log_file=None):
     if log_file is not None:
         log_file.write(msg + "\n")
         log_file.flush()
-
-
-def jpeg_encode(image: np.ndarray, quality: int = 95) -> bytes:
-    """Encode a uint8 HWC image to JPEG bytes."""
-    # OpenCV expects BGR; our images are RGB.
-    bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
-    if not ok:
-        raise RuntimeError("JPEG encoding failed")
-    return buf.tobytes()
 
 
 # ── environment ─────────────────────────────────────────────────────────────
@@ -211,44 +191,13 @@ def save_rollout_video(
     return mp4_path
 
 
-# ── gRPC helpers ────────────────────────────────────────────────────────────
-
-def grpc_reset(stub, task_name, task_description, env):
-    """Send a Reset RPC to the policy server."""
-    action_low, action_high = env.action_spec
-    request = policy_service_pb2.ResetRequest(
-        task_name=task_name,
-        task_description=task_description,
-        action_dim=action_low.shape[0],
-        action_low=action_low.tolist(),
-        action_high=action_high.tolist(),
-    )
-    response = stub.Reset(request)
-    return response.success
-
-
-def grpc_get_action(stub, observation, task_description, img_res):
-    """Send an observation and receive an action from the policy server."""
-    request = policy_service_pb2.ObservationRequest(
-        primary_image=jpeg_encode(observation["primary_image"]),
-        secondary_image=jpeg_encode(observation["secondary_image"]),
-        wrist_image=jpeg_encode(observation["wrist_image"]),
-        proprio=observation["proprio"].tolist(),
-        task_description=task_description,
-        image_height=img_res,
-        image_width=img_res,
-    )
-    response = stub.GetAction(request)
-    return np.array(response.action, dtype=np.float64)
-
-
 # ── episode / task runners ──────────────────────────────────────────────────
 
-def run_episode(args, env, task_description, stub, episode_idx, log_file=None):
+def run_episode(args, env, task_description, policy, episode_idx, log_file=None):
     """Run a single evaluation episode.
 
     The environment loop mirrors cosmos-policy's ``run_episode`` but replaces
-    local model inference with a ``GetAction`` gRPC call.
+    local model inference with a WebSocket policy.infer() call.
     """
     # Wait for objects to settle
     NUM_WAIT_STEPS = 10
@@ -265,6 +214,7 @@ def run_episode(args, env, task_description, stub, episode_idx, log_file=None):
 
     for t in range(max_steps):
         observation = prepare_observation(obs, flip_images=args.flip_images)
+        observation["task_description"] = task_description
 
         replay_primary.append(observation["primary_image"])
         replay_secondary.append(observation["secondary_image"])
@@ -272,11 +222,12 @@ def run_episode(args, env, task_description, stub, episode_idx, log_file=None):
 
         # Query the policy server
         start = time.time()
-        action = grpc_get_action(stub, observation, task_description, args.img_res)
+        result = policy.infer(observation)
+        action = result["actions"]
         query_time = time.time() - start
 
         if t % 50 == 0:
-            log(f"  t={t}: action query {query_time:.3f}s, action[:4]={action[:4]}", log_file)
+            log(f"  t={t}: infer {query_time:.3f}s, action[:4]={action[:4]}", log_file)
 
         # Extend 7D policy output to env.action_dim (e.g. 11 or 12 for PandaMobile)
         if action.shape[-1] == 7 and env.action_dim > 7:
@@ -284,6 +235,9 @@ def run_episode(args, env, task_description, stub, episode_idx, log_file=None):
             mobile_base = np.zeros(pad_dim, dtype=np.float64)
             mobile_base[-1] = -1.0  # last dim -1 often means "hold" for mobile base
             action = np.concatenate([action, mobile_base])
+
+        # Robosuite controllers (e.g. joint_vel) modify action in-place; ensure writable.
+        action = np.array(action, dtype=np.float64, copy=True)
 
         obs, reward, done, info = env.step(action)
         episode_length += 1
@@ -301,7 +255,7 @@ def run_episode(args, env, task_description, stub, episode_idx, log_file=None):
     return success, episode_length, replay_primary, replay_secondary, replay_wrist
 
 
-def run_task(args, stub, log_file=None):
+def run_task(args, policy, log_file=None):
     """Evaluate a task over multiple episodes and report success rate."""
     log(f"\nEvaluating task: {args.task_name}", log_file)
 
@@ -318,13 +272,18 @@ def run_task(args, stub, log_file=None):
         task_description = env.get_ep_meta()["lang"]
         log(f"Task description: {task_description}", log_file)
 
-        # Notify policy server of new episode
-        ok = grpc_reset(stub, args.task_name, task_description, env)
-        if not ok:
-            log("  WARNING: policy server Reset returned failure", log_file)
+        policy.reset()
+        action_low, action_high = env.action_spec
+        policy.infer({
+            "action_dim": action_low.shape[0],
+            "action_low": action_low,
+            "action_high": action_high,
+            "task_name": args.task_name,
+            "task_description": task_description,
+        })
 
         success, length, rep_p, rep_s, rep_w = run_episode(
-            args, env, task_description, stub, ep_idx, log_file
+            args, env, task_description, policy, ep_idx, log_file
         )
         successes.append(success)
         lengths.append(length)
@@ -364,12 +323,12 @@ def parse_args():
     all_tasks = list({**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}.keys())
 
     parser = argparse.ArgumentParser(
-        description="RoboCasa gRPC evaluation client",
+        description="RoboCasa WebSocket evaluation client",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # gRPC connection
-    parser.add_argument("--policy_server_addr", type=str, default="localhost:50051",
-                        help="Address of the policy gRPC server")
+    # WebSocket connection
+    parser.add_argument("--policy_server_addr", type=str, default="localhost:8000",
+                        help="Address of the WebSocket policy server (host:port)")
     parser.add_argument("--policy", type=str, default="randomPolicy",
                         help="Policy name for logging (e.g. randomPolicy, cosmos)")
     # Task
@@ -437,7 +396,7 @@ def main():
 
     # Comprehensive run header
     log("=" * 60, log_file)
-    log("RoboCasa gRPC Eval Run", log_file)
+    log("RoboCasa WebSocket Eval Run", log_file)
     log("=" * 60, log_file)
     log(f"  policy:           {args.policy}", log_file)
     log(f"  task_name:         {args.task_name}", log_file)
@@ -453,47 +412,39 @@ def main():
     log("=" * 60, log_file)
     log("", log_file)
 
-    log(f"Connecting to policy server at {args.policy_server_addr} ...", log_file)
+    addr = args.policy_server_addr
+    if ":" in addr:
+        host, port = addr.rsplit(":", 1)
+        port = int(port)
+    else:
+        host, port = addr, 8000
 
-    # Set up gRPC channel with increased message size (images can be large)
-    options = [
-        ("grpc.max_send_message_length", 50 * 1024 * 1024),    # 50 MB
-        ("grpc.max_receive_message_length", 50 * 1024 * 1024),  # 50 MB
-    ]
-    channel = grpc.insecure_channel(args.policy_server_addr, options=options)
-    stub = policy_service_pb2_grpc.PolicyServiceStub(channel)
+    log(f"Connecting to policy server at ws://{host}:{port} ...", log_file)
+    policy = WebsocketClientPolicy(host=host, port=port)
+    log(f"Server metadata: {policy.get_server_metadata()}", log_file)
 
     # ── Graceful shutdown on Ctrl+C / kill / docker stop ─────────────────
     def _cleanup(signum=None, frame=None):
-        print("\nCleaning up gRPC channel …", flush=True)
-        channel.close()
+        print("\nCleaning up ...", flush=True)
+        policy.close()
         if not log_file.closed:
             log_file.close()
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(1 if signum else 0)  # Force exit, avoids hang in Docker/Cursor
+        os._exit(1 if signum else 0)
 
     signal.signal(signal.SIGINT, _cleanup)
     signal.signal(signal.SIGTERM, _cleanup)
-    atexit.register(_cleanup)
-
-    # Wait for server to be ready
-    log("Waiting for policy server to be ready ...", log_file)
-    try:
-        grpc.channel_ready_future(channel).result(timeout=30)
-    except grpc.FutureTimeoutError:
-        log("ERROR: policy server did not become ready within 30 s", log_file)
-        sys.exit(1)
-    log("Policy server is ready.", log_file)
+    atexit.register(policy.close)
 
     try:
-        success_rate = run_task(args, stub, log_file)
+        success_rate = run_task(args, policy, log_file)
         log(f"\nLog saved to: {log_path}", log_file)
         print(f"\nLog saved to: {log_path}")
         print(f"Run directory (logs + videos): {run_dir}")
         return success_rate
     finally:
-        channel.close()
+        policy.close()
         if not log_file.closed:
             log_file.close()
 

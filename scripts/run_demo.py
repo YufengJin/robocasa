@@ -2,19 +2,19 @@
 """
 run_demo.py — 在仿真中运行 policy 并显示 GUI（不做 eval）。
 
-与 run_eval.py 类似，通过 gRPC 连接 Policy Server 获取动作，但仅用于演示：
+与 run_eval.py 类似，通过 WebSocket 连接 Policy Server 获取动作，但仅用于演示：
 - 默认开启 GUI（has_renderer=True）
 - 默认重置场景 10 次（--num_resets 10）
 - 不写 eval 日志、不统计 success rate，不保存视频（除非指定）
 
 用法:
     # 先启动 policy server，例如:
-    python tests/test_random_policy_server.py --port 50051
+    python tests/test_random_policy_server.py --port 8000
 
     # 再运行 demo（GUI + 默认 10 次 reset）:
     python scripts/run_demo.py \
         --task_name PnPCounterToCab \
-        --policy_server_addr localhost:50051
+        --policy_server_addr localhost:8000
 
     # 指定重置次数:
     python scripts/run_demo.py --task_name PnPCounterToCab --num_resets 5
@@ -29,17 +29,11 @@ import signal
 import sys
 import time
 
-import cv2
-import grpc
 import numpy as np
 import robosuite
 from robosuite.controllers import load_composite_controller_config
 
-_WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _WORKSPACE_ROOT not in sys.path:
-    sys.path.insert(0, _WORKSPACE_ROOT)
-
-from policy_bridge.grpc.robocasa import policy_service_pb2, policy_service_pb2_grpc  
+from policy_websocket import WebsocketClientPolicy
 from robocasa.utils.dataset_registry import (
     MULTI_STAGE_TASK_DATASETS,
     SINGLE_STAGE_TASK_DATASETS,
@@ -71,14 +65,6 @@ TASK_MAX_STEPS = {
     "TurnOnMicrowave": 500,
     "TurnOffMicrowave": 500,
 }
-
-
-def jpeg_encode(image: np.ndarray, quality: int = 95) -> bytes:
-    bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
-    if not ok:
-        raise RuntimeError("JPEG encoding failed")
-    return buf.tobytes()
 
 
 def create_robocasa_env(args, seed=None, episode_idx=None, use_gui: bool = True):
@@ -155,34 +141,7 @@ def prepare_observation(obs, flip_images: bool = True):
     }
 
 
-def grpc_reset(stub, task_name, task_description, env):
-    action_low, action_high = env.action_spec
-    request = policy_service_pb2.ResetRequest(
-        task_name=task_name,
-        task_description=task_description,
-        action_dim=action_low.shape[0],
-        action_low=action_low.tolist(),
-        action_high=action_high.tolist(),
-    )
-    response = stub.Reset(request)
-    return response.success
-
-
-def grpc_get_action(stub, observation, task_description, img_res):
-    request = policy_service_pb2.ObservationRequest(
-        primary_image=jpeg_encode(observation["primary_image"]),
-        secondary_image=jpeg_encode(observation["secondary_image"]),
-        wrist_image=jpeg_encode(observation["wrist_image"]),
-        proprio=observation["proprio"].tolist(),
-        task_description=task_description,
-        image_height=img_res,
-        image_width=img_res,
-    )
-    response = stub.GetAction(request)
-    return np.array(response.action, dtype=np.float64)
-
-
-def run_episode(args, env, task_description, stub, episode_idx, use_gui: bool):
+def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool):
     """跑一局：等物体稳定后按 max_steps 步循环取 obs -> policy -> step，并可选渲染。"""
     NUM_WAIT_STEPS = 10
     for _ in range(NUM_WAIT_STEPS):
@@ -195,11 +154,13 @@ def run_episode(args, env, task_description, stub, episode_idx, use_gui: bool):
 
     for t in range(max_steps):
         observation = prepare_observation(obs, flip_images=args.flip_images)
+        observation["task_description"] = task_description
 
         start = time.time()
-        action = grpc_get_action(stub, observation, task_description, args.img_res)
+        result = policy.infer(observation)
+        action = result["actions"]
         if t % 50 == 0:
-            print(f"  t={t}: action query {time.time() - start:.3f}s")
+            print(f"  t={t}: infer {time.time() - start:.3f}s")
 
         # Extend 7D policy output to env.action_dim (e.g. 11 or 12 for PandaMobile)
         if action.shape[-1] == 7 and env.action_dim > 7:
@@ -207,6 +168,9 @@ def run_episode(args, env, task_description, stub, episode_idx, use_gui: bool):
             mobile_base = np.zeros(pad_dim, dtype=np.float64)
             mobile_base[-1] = -1.0  # last dim -1 often means "hold" for mobile base
             action = np.concatenate([action, mobile_base])
+
+        # Robosuite controllers (e.g. joint_vel) modify action in-place; ensure writable.
+        action = np.array(action, dtype=np.float64, copy=True)
 
         obs, reward, done, info = env.step(action)
         episode_length += 1
@@ -229,8 +193,8 @@ def parse_args():
         description="RoboCasa demo: 在仿真中跑 policy 并显示 GUI，不做 eval",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--policy_server_addr", type=str, default="localhost:50051",
-                        help="Policy gRPC 服务地址")
+    parser.add_argument("--policy_server_addr", type=str, default="localhost:8000",
+                        help="WebSocket policy 服务地址 host:port")
     parser.add_argument("--policy", type=str, default="randomPolicy",
                         help="Policy 名称（仅用于打印）")
     parser.add_argument("--task_name", type=str, default="PnPCounterToCab",
@@ -268,58 +232,69 @@ def main():
     set_seed_everywhere(args.seed, deterministic=args.deterministic)
     use_gui = not args.no_gui
 
+    addr = args.policy_server_addr
+    if ":" in addr:
+        host, port = addr.rsplit(":", 1)
+        port = int(port)
+    else:
+        host, port = addr, 8000
+
     print("=" * 60)
     print("RoboCasa Demo (run policy in sim, no eval)")
     print("=" * 60)
     print(f"  task_name:    {args.task_name}")
     print(f"  num_resets:   {args.num_resets}")
     print(f"  policy:       {args.policy}")
-    print(f"  policy_server: {args.policy_server_addr}")
+    print(f"  policy_server: ws://{host}:{port}")
     print(f"  GUI:          {'on' if use_gui else 'off (--no_gui)'}")
     print("=" * 60)
 
-    options = [
-        ("grpc.max_send_message_length", 50 * 1024 * 1024),
-        ("grpc.max_receive_message_length", 50 * 1024 * 1024),
-    ]
-    channel = grpc.insecure_channel(args.policy_server_addr, options=options)
-    stub = policy_service_pb2_grpc.PolicyServiceStub(channel)
+    policy = WebsocketClientPolicy(host=host, port=port)
+    print(f"Server metadata: {policy.get_server_metadata()}")
+
+    env = None
 
     def _cleanup(signum=None, frame=None):
         print("\nCleaning up ...", flush=True)
-        channel.close()
+        if env is not None:
+            try:
+                env.close()
+            except Exception:
+                pass
+        policy.close()
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(1 if signum else 0)
 
     signal.signal(signal.SIGINT, _cleanup)
     signal.signal(signal.SIGTERM, _cleanup)
-    atexit.register(_cleanup)
+    atexit.register(policy.close)
 
-    print("Waiting for policy server ...")
     try:
-        grpc.channel_ready_future(channel).result(timeout=30)
-    except grpc.FutureTimeoutError:
-        print("ERROR: policy server not ready within 30s")
-        sys.exit(1)
-    print("Policy server ready.\n")
+        for ep_idx in range(args.num_resets):
+            print(f"\n--- Reset {ep_idx + 1}/{args.num_resets} ---")
+            seed = args.seed * ep_idx * 256 if args.deterministic else None
+            env = create_robocasa_env(args, seed=seed, episode_idx=ep_idx, use_gui=use_gui)
+            env.reset()
+            task_description = env.get_ep_meta()["lang"]
+            print(f"Task: {task_description}")
 
-    for ep_idx in range(args.num_resets):
-        print(f"--- Reset {ep_idx + 1}/{args.num_resets} ---")
-        seed = args.seed * ep_idx * 256 if args.deterministic else None
-        env = create_robocasa_env(args, seed=seed, episode_idx=ep_idx, use_gui=use_gui)
-        env.reset()
-        task_description = env.get_ep_meta()["lang"]
-        print(f"Task: {task_description}")
+            policy.reset()
+            action_low, action_high = env.action_spec
+            policy.infer({
+                "action_dim": action_low.shape[0],
+                "action_low": action_low,
+                "action_high": action_high,
+                "task_name": args.task_name,
+                "task_description": task_description,
+            })
 
-        ok = grpc_reset(stub, args.task_name, task_description, env)
-        if not ok:
-            print("  WARNING: policy server Reset returned failure")
+            run_episode(args, env, task_description, policy, ep_idx, use_gui)
+            env.close()
+            env = None
+    finally:
+        policy.close()
 
-        run_episode(args, env, task_description, stub, ep_idx, use_gui)
-        env.close()
-
-    channel.close()
     print("\nDone.")
 
 

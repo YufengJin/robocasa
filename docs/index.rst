@@ -26,7 +26,6 @@ Welcome to RoboCasa's documentation!
    use_cases/creating_datasets
    use_cases/mimicgen
    use_cases/policy_learning
-   use_cases/policy_server
 
 .. toctree::
    :maxdepth: 1
