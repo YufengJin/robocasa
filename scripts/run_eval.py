@@ -75,6 +75,17 @@ TASK_MAX_STEPS = {
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
+def get_task_max_steps(task_name, default_horizon=500):
+    """Return horizon for task; matches robocasa_rollout_utils for consistency with train_robocasa.
+    Checks TASK_MAX_STEPS first, then SINGLE_STAGE + MULTI_STAGE_TASK_DATASETS."""
+    if task_name in TASK_MAX_STEPS:
+        return TASK_MAX_STEPS[task_name]
+    all_tasks = {**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}
+    if task_name in all_tasks and "horizon" in all_tasks[task_name]:
+        return all_tasks[task_name]["horizon"]
+    return default_horizon
+
+
 def log(msg: str, log_file=None):
     """Print a message and optionally write it to a log file."""
     print(msg)
@@ -205,7 +216,7 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None)
         dummy = np.zeros(env.action_spec[0].shape)
         obs, _, _, _ = env.step(dummy)
 
-    max_steps = TASK_MAX_STEPS.get(args.task_name, 500)
+    max_steps = get_task_max_steps(args.task_name, default_horizon=500)
     success = False
     episode_length = 0
 
