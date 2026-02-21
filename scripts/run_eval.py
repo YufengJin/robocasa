@@ -18,14 +18,18 @@ Usage:
         --seed 195 \
         --policy_server_addr localhost:8000
 
+    # With joint space controller (cartesian_pose | joint_pos | joint_vel):
+    python scripts/run_eval.py --task_name PnPCounterToCab --arm_controller joint_vel
+
+    # DROID format for OpenPI DROID policy (joint_vel, DROID obs):
+    python scripts/run_eval.py --droid --policy_server_addr localhost:8000 --task_name PnPCounterToCab
+
     Logs and videos are written to: <log_dir>/<task_name>--<YYYYMMDD_HHMMSS>/
 """
 
 import argparse
-import ast
 import atexit
 import os
-import random
 import signal
 import sys
 import time
@@ -33,57 +37,22 @@ from datetime import datetime
 
 import imageio
 import numpy as np
-import robosuite
-from robosuite.controllers import load_composite_controller_config
 
 from policy_websocket import WebsocketClientPolicy
 from robocasa.utils.dataset_registry import (
     MULTI_STAGE_TASK_DATASETS,
     SINGLE_STAGE_TASK_DATASETS,
 )
-
-# ---------------------------------------------------------------------------
-# Task-specific max steps (from cosmos-policy reference)
-# ---------------------------------------------------------------------------
-TASK_MAX_STEPS = {
-    "PnPCounterToCab": 500,
-    "PnPCabToCounter": 500,
-    "PnPCounterToSink": 700,
-    "PnPSinkToCounter": 500,
-    "PnPCounterToMicrowave": 600,
-    "PnPMicrowaveToCounter": 500,
-    "PnPCounterToStove": 500,
-    "PnPStoveToCounter": 500,
-    "OpenSingleDoor": 500,
-    "CloseSingleDoor": 500,
-    "OpenDoubleDoor": 1000,
-    "CloseDoubleDoor": 700,
-    "OpenDrawer": 500,
-    "CloseDrawer": 500,
-    "TurnOnStove": 500,
-    "TurnOffStove": 500,
-    "TurnOnSinkFaucet": 500,
-    "TurnOffSinkFaucet": 500,
-    "TurnSinkSpout": 500,
-    "CoffeeSetupMug": 600,
-    "CoffeeServeMug": 600,
-    "CoffeePressButton": 300,
-    "TurnOnMicrowave": 500,
-    "TurnOffMicrowave": 500,
-}
-
-
-# ── helpers ─────────────────────────────────────────────────────────────────
-
-def get_task_max_steps(task_name, default_horizon=500):
-    """Return horizon for task; matches robocasa_rollout_utils for consistency with train_robocasa.
-    Checks TASK_MAX_STEPS first, then SINGLE_STAGE + MULTI_STAGE_TASK_DATASETS."""
-    if task_name in TASK_MAX_STEPS:
-        return TASK_MAX_STEPS[task_name]
-    all_tasks = {**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}
-    if task_name in all_tasks and "horizon" in all_tasks[task_name]:
-        return all_tasks[task_name]["horizon"]
-    return default_horizon
+from robocasa.utils.run_utils import (
+    ARM_CONTROLLER_MAP,
+    create_robocasa_env,
+    enable_joint_pos_observable,
+    get_task_max_steps,
+    pad_action_for_env,
+    prepare_observation,
+    prepare_observation_droid,
+    set_seed_everywhere,
+)
 
 
 def log(msg: str, log_file=None):
@@ -96,85 +65,19 @@ def log(msg: str, log_file=None):
 
 # ── environment ─────────────────────────────────────────────────────────────
 
-def create_robocasa_env(args, seed=None, episode_idx=None):
-    """Create a RoboCasa environment.
-
-    Mirrors cosmos-policy's ``create_robocasa_env`` but uses
-    ``load_composite_controller_config`` instead of a pickled controller blob.
-    """
-    # Parse layout_and_style_ids
-    layout_and_style_ids = None
-    if args.layout_and_style_ids:
-        all_layout_style_ids = ast.literal_eval(args.layout_and_style_ids)
-        if episode_idx is not None:
-            scene_index = (episode_idx // 10) % len(all_layout_style_ids)
-            layout_and_style_ids = (all_layout_style_ids[scene_index],)
-        else:
-            layout_and_style_ids = all_layout_style_ids
-
-    controller_configs = load_composite_controller_config(
-        controller=None,
-        robot=args.robots if isinstance(args.robots, str) else args.robots[0],
-    )
-
-    env_kwargs = dict(
-        env_name=args.task_name,
+def _create_env(args, seed=None, episode_idx=None):
+    """Create a RoboCasa environment for eval (no GUI)."""
+    return create_robocasa_env(
+        task_name=args.task_name,
         robots=args.robots,
-        controller_configs=controller_configs,
-        camera_names=[
-            "robot0_agentview_left",
-            "robot0_agentview_right",
-            "robot0_eye_in_hand",
-        ],
-        camera_widths=args.img_res,
-        camera_heights=args.img_res,
-        has_renderer=False,
-        has_offscreen_renderer=True,
-        ignore_done=True,
-        use_object_obs=True,
-        use_camera_obs=True,
-        camera_depths=False,
-        seed=seed,
+        arm_controller=args.arm_controller,
+        img_res=args.img_res,
         obj_instance_split=args.obj_instance_split,
-        generative_textures=None,
-        randomize_cameras=False,
-        layout_and_style_ids=layout_and_style_ids,
-        translucent_robot=False,
+        layout_and_style_ids=args.layout_and_style_ids,
+        seed=seed,
+        episode_idx=episode_idx,
+        use_gui=False,
     )
-    env = robosuite.make(**env_kwargs)
-    return env
-
-
-def prepare_observation(obs, flip_images: bool = True):
-    """Extract images and proprio from a raw environment observation.
-
-    Returns a dict with keys:
-        primary_image, secondary_image, wrist_image, proprio
-    """
-    primary_img = obs.get("robot0_agentview_left_image")
-    secondary_img = obs.get("robot0_agentview_right_image")
-    wrist_img = obs.get("robot0_eye_in_hand_image")
-
-    if flip_images:
-        if primary_img is not None:
-            primary_img = np.flipud(primary_img).copy()
-        if secondary_img is not None:
-            secondary_img = np.flipud(secondary_img).copy()
-        if wrist_img is not None:
-            wrist_img = np.flipud(wrist_img).copy()
-
-    proprio = np.concatenate((
-        obs["robot0_gripper_qpos"],
-        obs["robot0_eef_pos"],
-        obs["robot0_eef_quat"],
-    ))
-
-    return {
-        "primary_image": primary_img,
-        "secondary_image": secondary_img,
-        "wrist_image": wrist_img,
-        "proprio": proprio,
-    }
 
 
 # ── video saving ────────────────────────────────────────────────────────────
@@ -187,16 +90,24 @@ def save_rollout_video(
     success,
     task_description,
     output_dir,
+    droid_mode=False,
 ):
-    """Save a concatenated MP4 of primary | secondary | wrist camera views."""
+    """Save a concatenated MP4 of primary | secondary | wrist camera views.
+    When droid_mode=True, uses primary | wrist only (two-panel).
+    """
     os.makedirs(output_dir, exist_ok=True)
     tag = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")[:40]
     filename = f"episode={episode_idx}--success={success}--task={tag}.mp4"
     mp4_path = os.path.join(output_dir, filename)
     writer = imageio.get_writer(mp4_path, fps=30, format="FFMPEG", codec="libx264")
-    for p, s, w in zip(primary_images, secondary_images, wrist_images):
-        frame = np.concatenate([p, s, w], axis=1)
-        writer.append_data(frame)
+    if droid_mode:
+        for p, w in zip(primary_images, wrist_images):
+            frame = np.concatenate([p, w], axis=1)
+            writer.append_data(frame)
+    else:
+        for p, s, w in zip(primary_images, secondary_images, wrist_images):
+            frame = np.concatenate([p, s, w], axis=1)
+            writer.append_data(frame)
     writer.close()
     print(f"Saved rollout video: {mp4_path}")
     return mp4_path
@@ -210,6 +121,8 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None)
     The environment loop mirrors cosmos-policy's ``run_episode`` but replaces
     local model inference with a WebSocket policy.infer() call.
     """
+    droid = getattr(args, "droid", False)
+
     # Wait for objects to settle
     NUM_WAIT_STEPS = 10
     for _ in range(NUM_WAIT_STEPS):
@@ -224,31 +137,32 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None)
     replay_primary, replay_secondary, replay_wrist = [], [], []
 
     for t in range(max_steps):
-        observation = prepare_observation(obs, flip_images=args.flip_images)
-        observation["task_description"] = task_description
-
-        replay_primary.append(observation["primary_image"])
-        replay_secondary.append(observation["secondary_image"])
-        replay_wrist.append(observation["wrist_image"])
+        if droid:
+            observation = prepare_observation_droid(
+                obs, task_description, flip_images=args.flip_images, img_size=args.img_res
+            )
+            replay_primary.append(observation["observation/exterior_image_1_left"])
+            replay_secondary.append(observation["observation/exterior_image_1_left"])
+            replay_wrist.append(observation["observation/wrist_image_left"])
+        else:
+            observation = prepare_observation(obs, flip_images=args.flip_images)
+            observation["task_description"] = task_description
+            replay_primary.append(observation["primary_image"])
+            replay_secondary.append(observation["secondary_image"])
+            replay_wrist.append(observation["wrist_image"])
 
         # Query the policy server
         start = time.time()
         result = policy.infer(observation)
         action = result["actions"]
+        if hasattr(action, "ndim") and action.ndim > 1:
+            action = action[0]
         query_time = time.time() - start
 
         if t % 50 == 0:
             log(f"  t={t}: infer {query_time:.3f}s, action[:4]={action[:4]}", log_file)
 
-        # Extend 7D policy output to env.action_dim (e.g. 11 or 12 for PandaMobile)
-        if action.shape[-1] == 7 and env.action_dim > 7:
-            pad_dim = env.action_dim - 7
-            mobile_base = np.zeros(pad_dim, dtype=np.float64)
-            mobile_base[-1] = -1.0  # last dim -1 often means "hold" for mobile base
-            action = np.concatenate([action, mobile_base])
-
-        # Robosuite controllers (e.g. joint_vel) modify action in-place; ensure writable.
-        action = np.array(action, dtype=np.float64, copy=True)
+        action = pad_action_for_env(action, args.arm_controller, env.action_dim)
 
         obs, reward, done, info = env.step(action)
         episode_length += 1
@@ -277,21 +191,25 @@ def run_task(args, policy, log_file=None):
         log(f"\n--- Episode {ep_idx + 1}/{args.num_trials} ---", log_file)
 
         seed = args.seed * ep_idx * 256 if args.deterministic else None
-        env = create_robocasa_env(args, seed=seed, episode_idx=ep_idx)
+        env = _create_env(args, seed=seed, episode_idx=ep_idx)
         env.reset()
+        if args.droid:
+            enable_joint_pos_observable(env)
 
         task_description = env.get_ep_meta()["lang"]
         log(f"Task description: {task_description}", log_file)
 
         policy.reset()
         action_low, action_high = env.action_spec
-        policy.infer({
-            "action_dim": action_low.shape[0],
-            "action_low": action_low,
-            "action_high": action_high,
-            "task_name": args.task_name,
-            "task_description": task_description,
-        })
+        if not args.droid:
+            init_obs = {
+                "action_dim": action_low.shape[0],
+                "action_low": action_low,
+                "action_high": action_high,
+                "task_name": args.task_name,
+                "task_description": task_description,
+            }
+            policy.infer(init_obs)
 
         success, length, rep_p, rep_s, rep_w = run_episode(
             args, env, task_description, policy, ep_idx, log_file
@@ -305,6 +223,7 @@ def run_task(args, policy, log_file=None):
                 rep_p, rep_s, rep_w,
                 ep_idx, success, task_description,
                 output_dir=args.log_dir,
+                droid_mode=args.droid,
             )
 
         env.close()
@@ -348,6 +267,12 @@ def parse_args():
                         help="RoboCasa task name")
     parser.add_argument("--num_trials", type=int, default=5,
                         help="Number of evaluation episodes per task")
+    # Controller
+    parser.add_argument("--droid", action="store_true",
+                        help="Use DROID obs format (joint_vel, OpenPI DROID policy)")
+    parser.add_argument("--arm_controller", type=str, default="cartesian_pose",
+                        choices=list(ARM_CONTROLLER_MAP.keys()),
+                        help="Arm controller type (ignored when --droid)")
     # Environment
     parser.add_argument("--robots", type=str, default="PandaMobile",
                         help="Robot type")
@@ -377,16 +302,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def set_seed_everywhere(seed: int, deterministic: bool = True):
-    """Set global random seeds for reproducibility."""
-    if deterministic:
-        os.environ["DETERMINISTIC"] = "True"
-    random.seed(seed)
-    np.random.seed(seed)
-
-
 def main():
     args = parse_args()
+
+    if args.droid:
+        args.arm_controller = "joint_vel"
 
     # Validate task
     all_tasks = {**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}
@@ -418,6 +338,8 @@ def main():
     log(f"  log_dir (run_dir): {run_dir}", log_file)
     log(f"  img_res:           {args.img_res}", log_file)
     log(f"  robots:            {args.robots}", log_file)
+    log(f"  arm_controller:    {args.arm_controller} ({ARM_CONTROLLER_MAP[args.arm_controller]})", log_file)
+    log(f"  droid:              {args.droid}", log_file)
     log(f"  obj_instance_split: {args.obj_instance_split}", log_file)
     log(f"  layout_and_style_ids: {args.layout_and_style_ids}", log_file)
     log("=" * 60, log_file)

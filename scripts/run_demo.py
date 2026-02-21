@@ -18,159 +18,89 @@ run_demo.py — 在仿真中运行 policy 并显示 GUI（不做 eval）。
 
     # 指定重置次数:
     python scripts/run_demo.py --task_name PnPCounterToCab --num_resets 5
+
+    # 关节空间控制器（cartesian_pose | joint_pos | joint_vel）:
+    python scripts/run_demo.py --task_name PnPCounterToCab --arm_controller joint_pos
+
+    # 无 GUI 模式:
+    python scripts/run_demo.py --task_name PnPCounterToCab --no_gui
+
+    # DROID 格式（OpenPI DROID policy, joint_vel）:
+    python scripts/run_demo.py --droid --policy_server_addr localhost:8000 --task_name PnPCounterToCab
 """
 
 import argparse
-import ast
 import atexit
 import os
-import random
 import signal
 import sys
 import time
 
 import numpy as np
-import robosuite
-from robosuite.controllers import load_composite_controller_config
 
 from policy_websocket import WebsocketClientPolicy
 from robocasa.utils.dataset_registry import (
     MULTI_STAGE_TASK_DATASETS,
     SINGLE_STAGE_TASK_DATASETS,
 )
-
-TASK_MAX_STEPS = {
-    "PnPCounterToCab": 500,
-    "PnPCabToCounter": 500,
-    "PnPCounterToSink": 700,
-    "PnPSinkToCounter": 500,
-    "PnPCounterToMicrowave": 600,
-    "PnPMicrowaveToCounter": 500,
-    "PnPCounterToStove": 500,
-    "PnPStoveToCounter": 500,
-    "OpenSingleDoor": 500,
-    "CloseSingleDoor": 500,
-    "OpenDoubleDoor": 1000,
-    "CloseDoubleDoor": 700,
-    "OpenDrawer": 500,
-    "CloseDrawer": 500,
-    "TurnOnStove": 500,
-    "TurnOffStove": 500,
-    "TurnOnSinkFaucet": 500,
-    "TurnOffSinkFaucet": 500,
-    "TurnSinkSpout": 500,
-    "CoffeeSetupMug": 600,
-    "CoffeeServeMug": 600,
-    "CoffeePressButton": 300,
-    "TurnOnMicrowave": 500,
-    "TurnOffMicrowave": 500,
-}
+from robocasa.utils.run_utils import (
+    ARM_CONTROLLER_MAP,
+    create_robocasa_env,
+    enable_joint_pos_observable,
+    get_task_max_steps,
+    pad_action_for_env,
+    prepare_observation,
+    prepare_observation_droid,
+    set_seed_everywhere,
+)
 
 
-def create_robocasa_env(args, seed=None, episode_idx=None, use_gui: bool = True):
-    """创建 RoboCasa 环境；use_gui=True 时开启屏幕渲染并显示 GUI。"""
-    layout_and_style_ids = None
-    if args.layout_and_style_ids:
-        all_layout_style_ids = ast.literal_eval(args.layout_and_style_ids)
-        if episode_idx is not None:
-            scene_index = (episode_idx // 10) % len(all_layout_style_ids)
-            layout_and_style_ids = (all_layout_style_ids[scene_index],)
-        else:
-            layout_and_style_ids = all_layout_style_ids
-
-    controller_configs = load_composite_controller_config(
-        controller=None,
-        robot=args.robots if isinstance(args.robots, str) else args.robots[0],
-    )
-
-    env_kwargs = dict(
-        env_name=args.task_name,
+def _create_env(args, seed=None, episode_idx=None, use_gui: bool = True):
+    """Create a RoboCasa environment for demo (optionally with GUI)."""
+    return create_robocasa_env(
+        task_name=args.task_name,
         robots=args.robots,
-        controller_configs=controller_configs,
-        camera_names=[
-            "robot0_agentview_left",
-            "robot0_agentview_right",
-            "robot0_eye_in_hand",
-        ],
-        camera_widths=args.img_res,
-        camera_heights=args.img_res,
-        has_renderer=use_gui,
-        has_offscreen_renderer=True,
-        ignore_done=True,
-        use_object_obs=True,
-        use_camera_obs=True,
-        camera_depths=False,
-        seed=seed,
+        arm_controller=args.arm_controller,
+        img_res=args.img_res,
         obj_instance_split=args.obj_instance_split,
-        generative_textures=None,
-        randomize_cameras=False,
-        layout_and_style_ids=layout_and_style_ids,
-        translucent_robot=False,
+        layout_and_style_ids=args.layout_and_style_ids,
+        seed=seed,
+        episode_idx=episode_idx,
+        use_gui=use_gui,
     )
-    if use_gui:
-        # # render_camera=None 使用 mjviewer 默认自由相机，支持鼠标拖拽旋转/平移视角；
-        # # 若设为固定相机（如 "robot0_agentview_center"）则无法拖拽。
-        # env_kwargs["render_camera"] = None
-        # env_kwargs["renderer"] = "mjviewer"
-        env_kwargs["render_camera"] = "robot0_agentview_left"
-    env = robosuite.make(**env_kwargs)
-    return env
-
-
-def prepare_observation(obs, flip_images: bool = True):
-    primary_img = obs.get("robot0_agentview_left_image")
-    secondary_img = obs.get("robot0_agentview_right_image")
-    wrist_img = obs.get("robot0_eye_in_hand_image")
-    if flip_images:
-        if primary_img is not None:
-            primary_img = np.flipud(primary_img).copy()
-        if secondary_img is not None:
-            secondary_img = np.flipud(secondary_img).copy()
-        if wrist_img is not None:
-            wrist_img = np.flipud(wrist_img).copy()
-    proprio = np.concatenate((
-        obs["robot0_gripper_qpos"],
-        obs["robot0_eef_pos"],
-        obs["robot0_eef_quat"],
-    ))
-    return {
-        "primary_image": primary_img,
-        "secondary_image": secondary_img,
-        "wrist_image": wrist_img,
-        "proprio": proprio,
-    }
 
 
 def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool):
     """跑一局：等物体稳定后按 max_steps 步循环取 obs -> policy -> step，并可选渲染。"""
+    droid = getattr(args, "droid", False)
+
     NUM_WAIT_STEPS = 10
     for _ in range(NUM_WAIT_STEPS):
         dummy = np.zeros(env.action_spec[0].shape)
         obs, _, _, _ = env.step(dummy)
 
-    max_steps = TASK_MAX_STEPS.get(args.task_name, 500)
+    max_steps = get_task_max_steps(args.task_name, default_horizon=500)
     success = False
     episode_length = 0
 
     for t in range(max_steps):
-        observation = prepare_observation(obs, flip_images=args.flip_images)
-        observation["task_description"] = task_description
+        if droid:
+            observation = prepare_observation_droid(
+                obs, task_description, flip_images=args.flip_images, img_size=args.img_res
+            )
+        else:
+            observation = prepare_observation(obs, flip_images=args.flip_images)
+            observation["task_description"] = task_description
 
         start = time.time()
         result = policy.infer(observation)
         action = result["actions"]
+        if hasattr(action, "ndim") and action.ndim > 1:
+            action = action[0]
         if t % 50 == 0:
             print(f"  t={t}: infer {time.time() - start:.3f}s")
 
-        # Extend 7D policy output to env.action_dim (e.g. 11 or 12 for PandaMobile)
-        if action.shape[-1] == 7 and env.action_dim > 7:
-            pad_dim = env.action_dim - 7
-            mobile_base = np.zeros(pad_dim, dtype=np.float64)
-            mobile_base[-1] = -1.0  # last dim -1 often means "hold" for mobile base
-            action = np.concatenate([action, mobile_base])
-
-        # Robosuite controllers (e.g. joint_vel) modify action in-place; ensure writable.
-        action = np.array(action, dtype=np.float64, copy=True)
+        action = pad_action_for_env(action, args.arm_controller, env.action_dim)
 
         obs, reward, done, info = env.step(action)
         episode_length += 1
@@ -201,6 +131,11 @@ def parse_args():
                         choices=all_tasks, help="任务名")
     parser.add_argument("--num_resets", type=int, default=10,
                         help="重置场景次数（默认 10 次）")
+    parser.add_argument("--droid", action="store_true",
+                        help="Use DROID obs format (joint_vel, OpenPI DROID policy)")
+    parser.add_argument("--arm_controller", type=str, default="cartesian_pose",
+                        choices=list(ARM_CONTROLLER_MAP.keys()),
+                        help="Arm controller type (ignored when --droid)")
     parser.add_argument("--robots", type=str, default="PandaMobile")
     parser.add_argument("--img_res", type=int, default=224)
     parser.add_argument("--obj_instance_split", type=str, default="B")
@@ -216,15 +151,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def set_seed_everywhere(seed: int, deterministic: bool = True):
-    if deterministic:
-        os.environ["DETERMINISTIC"] = "True"
-    random.seed(seed)
-    np.random.seed(seed)
-
-
 def main():
     args = parse_args()
+    if args.droid:
+        args.arm_controller = "joint_vel"
+
     all_tasks = {**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}
     if args.task_name not in all_tasks:
         raise ValueError(f"Unknown task: {args.task_name}. Available: {list(all_tasks.keys())}")
@@ -245,6 +176,8 @@ def main():
     print(f"  task_name:    {args.task_name}")
     print(f"  num_resets:   {args.num_resets}")
     print(f"  policy:       {args.policy}")
+    print(f"  arm_controller: {args.arm_controller} ({ARM_CONTROLLER_MAP[args.arm_controller]})")
+    print(f"  droid:         {args.droid}")
     print(f"  policy_server: ws://{host}:{port}")
     print(f"  GUI:          {'on' if use_gui else 'off (--no_gui)'}")
     print("=" * 60)
@@ -274,20 +207,24 @@ def main():
         for ep_idx in range(args.num_resets):
             print(f"\n--- Reset {ep_idx + 1}/{args.num_resets} ---")
             seed = args.seed * ep_idx * 256 if args.deterministic else None
-            env = create_robocasa_env(args, seed=seed, episode_idx=ep_idx, use_gui=use_gui)
+            env = _create_env(args, seed=seed, episode_idx=ep_idx, use_gui=use_gui)
             env.reset()
+            if args.droid:
+                enable_joint_pos_observable(env)
             task_description = env.get_ep_meta()["lang"]
             print(f"Task: {task_description}")
 
             policy.reset()
             action_low, action_high = env.action_spec
-            policy.infer({
-                "action_dim": action_low.shape[0],
-                "action_low": action_low,
-                "action_high": action_high,
-                "task_name": args.task_name,
-                "task_description": task_description,
-            })
+            if not args.droid:
+                init_obs = {
+                    "action_dim": action_low.shape[0],
+                    "action_low": action_low,
+                    "action_high": action_high,
+                    "task_name": args.task_name,
+                    "task_description": task_description,
+                }
+                policy.infer(init_obs)
 
             run_episode(args, env, task_description, policy, ep_idx, use_gui)
             env.close()
