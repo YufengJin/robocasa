@@ -6,20 +6,14 @@ Usage:
     python tests/test_random_policy_server.py --port 8000
 
 Then connect with:
-    python tests/run_demo.py --policy_server_addr localhost:8000 --task_name PnPCounterToCab
+    python scripts/run_demo.py --policy_server_addr localhost:8000 --task_name PnPCounterToCab
 """
 
 import argparse
 import logging
-import sys
-import os
 from typing import Dict
 
 import numpy as np
-
-_WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _WORKSPACE_ROOT not in sys.path:
-    sys.path.insert(0, _WORKSPACE_ROOT)
 
 from policy_websocket import BasePolicy, WebsocketPolicyServer
 

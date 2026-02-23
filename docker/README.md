@@ -1,157 +1,152 @@
-# RoboCasa Docker 使用指南
+# RoboCasa Docker Guide
 
-本文档介绍如何使用 Docker 构建和运行 RoboCasa 容器。
+This document describes how to build and run RoboCasa containers.
 
-## 前提条件
+## Prerequisites
 
-- Docker 和 Docker Compose 已安装
-- NVIDIA Docker 运行时已配置（用于 GPU 支持）
-- 对于 X11 模式：X11 服务器正在运行
+- Docker and Docker Compose installed
+- NVIDIA Docker runtime configured (for GPU support)
+- For X11 mode: X11 server running on the host
 
-## 构建镜像
+## Build Image
 
-从项目根目录运行以下命令构建 Docker 镜像：
+From the project root:
 
 ```bash
 cd docker
 docker-compose -f docker-compose.x11.yaml build
-# 或者
+# or
 docker-compose -f docker-compose.headless.yaml build
 ```
 
-或者使用自定义镜像名称：
+With custom image name:
 
 ```bash
 IMAGE=robocasa:custom docker-compose -f docker-compose.x11.yaml build
 ```
 
-## 启动容器
+## Start Container
 
-### X11 模式（支持 GUI 显示）
+### X11 mode (GUI display)
 
-适用于需要可视化界面的场景：
+For visualization:
 
 ```bash
 cd docker
 DISPLAY=${DISPLAY} docker-compose -f docker-compose.x11.yaml up -d
 ```
 
-或者前台运行：
+Or foreground:
 
 ```bash
 DISPLAY=${DISPLAY} docker-compose -f docker-compose.x11.yaml up
 ```
 
-### 无头模式（Headless）
+### Headless mode
 
-适用于不需要 GUI 的场景（如训练、数据处理等）：
+For training, batch evaluation, or other non-GUI use:
 
 ```bash
 cd docker
 docker-compose -f docker-compose.headless.yaml up -d
 ```
 
-或者前台运行：
+Or foreground:
 
 ```bash
 docker-compose -f docker-compose.headless.yaml up
 ```
 
-## 进入容器
-
-容器启动后，可以使用以下命令进入容器：
+## Attach to Container
 
 ```bash
 docker exec -it robocasa_container bash
 ```
 
-## 停止容器
+## Stop Container
 
 ```bash
 cd docker
 docker-compose -f docker-compose.x11.yaml down
-# 或者
+# or
 docker-compose -f docker-compose.headless.yaml down
 ```
 
-## 查看容器日志
+## View Logs
 
 ```bash
 docker logs robocasa_container
-# 或者实时查看
+# or follow
 docker logs -f robocasa_container
 ```
 
-## 容器配置说明
+## Configuration
 
-### 容器名称
-- 固定容器名称：`robocasa_container`
+### Container name
+- Fixed name: `robocasa_container`
 
-### GPU 配置
-- 自动检测并使用所有可用的 NVIDIA GPU
-- 使用 `GPU` 环境变量可以控制 GPU 使用（默认为 `all`）
+### GPU
+- Uses all available NVIDIA GPUs by default
+- Set `GPU` env var to override (default: `all`)
 
-### 工作目录
-- 容器内工作目录：`/workspace`
+### Working directory
+- Container workdir: `/workspace`
 
-### 网络模式
-- 使用 `host` 网络模式，容器与主机共享网络
+### Network
+- Uses `host` network mode
 
-### 环境变量
-- **DISPLAY**（仅 X11 模式）：X11 显示设置
-- **GPU**：GPU 配置（默认为 `all`）
+### Environment variables
+- **DISPLAY** (X11 only): X11 display
+- **GPU**: GPU selection (default: `all`)
 
-## 常见问题
+## Troubleshooting
 
-### X11 权限错误
-
-如果遇到 X11 权限问题，运行：
+### X11 permission denied
 
 ```bash
 xhost +local:docker
 ```
 
-### GPU 不可用
-
-确保已安装并配置 NVIDIA Docker 运行时：
+### GPU not detected
 
 ```bash
 docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu20.04 nvidia-smi
 ```
 
-### 容器已存在
-
-如果容器名称冲突，先停止并删除现有容器：
+### Container name conflict
 
 ```bash
 docker stop robocasa_container
 docker rm robocasa_container
 ```
 
-## 示例使用
+## Example Usage
 
-进入容器后，可以运行 RoboCasa 的各种功能：
+Inside the container:
 
 ```bash
-# 激活环境（会自动激活）
 micromamba activate robocasa
 
-# 运行演示
+# Demos
 python -m robocasa.demos.demo_kitchen_scenes
 python -m robocasa.demos.demo_tasks
 python -m robocasa.demos.demo_objects
 python -m robocasa.demos.demo_teleop
 
-# 下载资源（如果未在构建时下载）
+# Download assets (if not done at build)
 python robocasa/scripts/download_kitchen_assets.py
 
-# 下载数据集
+# Download datasets
 python robocasa/scripts/download_datasets.py --ds_types human_im
+
+# Run eval (start policy server first in another terminal)
+python tests/test_random_policy_server.py --port 8000
+python scripts/run_eval.py --task_name PnPCounterToCab --policy_server_addr localhost:8000
 ```
 
-## 注意事项
+## Notes
 
-- X11 模式下，确保 X11 服务器正在运行且允许 Docker 连接
-- 首次构建可能需要较长时间（需要下载依赖和资源）
-- 容器内的 `/workspace` 目录包含 robocasa 和 robosuite 的源代码
-- 如需持久化数据，可以添加卷映射到 docker-compose 文件
+- X11 mode requires a running X server and `xhost` access for Docker
+- First build can take a while (dependencies and assets)
+- `/workspace` contains robocasa and robosuite source
+- Add volume mounts in docker-compose for persistent data

@@ -63,8 +63,6 @@ def log(msg: str, log_file=None):
         log_file.flush()
 
 
-# ── environment ─────────────────────────────────────────────────────────────
-
 def _create_env(args, seed=None, episode_idx=None):
     """Create a RoboCasa environment for eval (no GUI)."""
     return create_robocasa_env(
@@ -79,8 +77,6 @@ def _create_env(args, seed=None, episode_idx=None):
         use_gui=False,
     )
 
-
-# ── video saving ────────────────────────────────────────────────────────────
 
 def save_rollout_video(
     primary_images,
@@ -113,17 +109,9 @@ def save_rollout_video(
     return mp4_path
 
 
-# ── episode / task runners ──────────────────────────────────────────────────
-
 def run_episode(args, env, task_description, policy, episode_idx, log_file=None):
-    """Run a single evaluation episode.
-
-    The environment loop mirrors cosmos-policy's ``run_episode`` but replaces
-    local model inference with a WebSocket policy.infer() call.
-    """
+    """Run a single evaluation episode via WebSocket policy.infer()."""
     droid = getattr(args, "droid", False)
-
-    # Wait for objects to settle
     NUM_WAIT_STEPS = 10
     for _ in range(NUM_WAIT_STEPS):
         dummy = np.zeros(env.action_spec[0].shape)
@@ -132,8 +120,6 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None)
     max_steps = get_task_max_steps(args.task_name, default_horizon=500)
     success = False
     episode_length = 0
-
-    # Containers for replay video
     replay_primary, replay_secondary, replay_wrist = [], [], []
 
     for t in range(max_steps):
@@ -151,7 +137,6 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None)
             replay_secondary.append(observation["secondary_image"])
             replay_wrist.append(observation["wrist_image"])
 
-        # Query the policy server
         start = time.time()
         result = policy.infer(observation)
         action = result["actions"]
@@ -216,8 +201,6 @@ def run_task(args, policy, log_file=None):
         )
         successes.append(success)
         lengths.append(length)
-
-        # Save video
         if args.save_video:
             save_rollout_video(
                 rep_p, rep_s, rep_w,
@@ -231,7 +214,6 @@ def run_task(args, policy, log_file=None):
         sr = sum(successes) / len(successes) * 100
         log(f"Running success rate: {sum(successes)}/{len(successes)} ({sr:.1f}%)", log_file)
 
-    # Final summary
     success_rate = np.mean(successes)
     avg_length = np.mean(lengths)
     log("\n" + "=" * 60, log_file)
@@ -247,8 +229,6 @@ def run_task(args, policy, log_file=None):
     return success_rate
 
 
-# ── main ────────────────────────────────────────────────────────────────────
-
 def parse_args():
     all_tasks = list({**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}.keys())
 
@@ -256,24 +236,20 @@ def parse_args():
         description="RoboCasa WebSocket evaluation client",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # WebSocket connection
     parser.add_argument("--policy_server_addr", type=str, default="localhost:8000",
                         help="Address of the WebSocket policy server (host:port)")
     parser.add_argument("--policy", type=str, default="randomPolicy",
                         help="Policy name for logging (e.g. randomPolicy, cosmos)")
-    # Task
     parser.add_argument("--task_name", type=str, default="PnPCounterToCab",
                         choices=all_tasks,
                         help="RoboCasa task name")
     parser.add_argument("--num_trials", type=int, default=5,
                         help="Number of evaluation episodes per task")
-    # Controller
     parser.add_argument("--droid", action="store_true",
                         help="Use DROID obs format (joint_vel, OpenPI DROID policy)")
     parser.add_argument("--arm_controller", type=str, default="cartesian_pose",
                         choices=list(ARM_CONTROLLER_MAP.keys()),
                         help="Arm controller type (ignored when --droid)")
-    # Environment
     parser.add_argument("--robots", type=str, default="PandaMobile",
                         help="Robot type")
     parser.add_argument("--img_res", type=int, default=224,
@@ -286,13 +262,11 @@ def parse_args():
     parser.add_argument("--flip_images", action="store_true", default=True,
                         help="Flip images vertically (RoboCasa renders upside-down)")
     parser.add_argument("--no_flip_images", action="store_false", dest="flip_images")
-    # Reproducibility
     parser.add_argument("--seed", type=int, default=195,
                         help="Random seed")
     parser.add_argument("--deterministic", action="store_true", default=True,
                         help="Use deterministic seeding")
     parser.add_argument("--no_deterministic", action="store_false", dest="deterministic")
-    # Logging
     parser.add_argument("--log_dir", type=str, default="./eval_logs",
                         help="Directory for logs and rollout videos")
     parser.add_argument("--save_video", action="store_true", default=True,
@@ -313,19 +287,14 @@ def main():
     if args.task_name not in all_tasks:
         raise ValueError(f"Unknown task: {args.task_name}. Available: {list(all_tasks.keys())}")
 
-    # Set global seed before any other randomness
     set_seed_everywhere(args.seed, deterministic=args.deterministic)
-
-    # Log directory: base_log_dir / task_name--YYYYMMDD_HHMMSS
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join(args.log_dir, f"{args.task_name}--{date_str}")
     os.makedirs(run_dir, exist_ok=True)
-    args.log_dir = run_dir  # use run_dir for this run's logs and videos
+    args.log_dir = run_dir
 
     log_path = os.path.join(run_dir, "eval.log")
     log_file = open(log_path, "w")
-
-    # Comprehensive run header
     log("=" * 60, log_file)
     log("RoboCasa WebSocket Eval Run", log_file)
     log("=" * 60, log_file)
@@ -356,7 +325,6 @@ def main():
     policy = WebsocketClientPolicy(host=host, port=port)
     log(f"Server metadata: {policy.get_server_metadata()}", log_file)
 
-    # ── Graceful shutdown on Ctrl+C / kill / docker stop ─────────────────
     def _cleanup(signum=None, frame=None):
         print("\nCleaning up ...", flush=True)
         policy.close()

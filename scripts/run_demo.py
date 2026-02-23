@@ -1,31 +1,18 @@
 #!/usr/bin/env python3
 """
-run_demo.py — 在仿真中运行 policy 并显示 GUI（不做 eval）。
+run_demo.py — Run policy in simulation (no eval).
 
-与 run_eval.py 类似，通过 WebSocket 连接 Policy Server 获取动作，但仅用于演示：
-- 默认开启 GUI（has_renderer=True）
-- 默认重置场景 10 次（--num_resets 10）
-- 不写 eval 日志、不统计 success rate，不保存视频（除非指定）
+Connects to a Policy Server over WebSocket for action inference. For demo only:
+- Default: headless (no_gui), saves videos to demo_log/
+- Use --gui for interactive GUI
+- No eval logs or success-rate tracking
 
-用法:
-    # 先启动 policy server，例如:
+Usage:
     python tests/test_random_policy_server.py --port 8000
 
-    # 再运行 demo（GUI + 默认 10 次 reset）:
-    python scripts/run_demo.py \
-        --task_name PnPCounterToCab \
-        --policy_server_addr localhost:8000
-
-    # 指定重置次数:
-    python scripts/run_demo.py --task_name PnPCounterToCab --num_resets 5
-
-    # 关节空间控制器（cartesian_pose | joint_pos | joint_vel）:
+    python scripts/run_demo.py --task_name PnPCounterToCab --policy_server_addr localhost:8000
+    python scripts/run_demo.py --gui --task_name PnPCounterToCab --policy_server_addr localhost:8000
     python scripts/run_demo.py --task_name PnPCounterToCab --arm_controller joint_pos
-
-    # 无 GUI 模式:
-    python scripts/run_demo.py --task_name PnPCounterToCab --no_gui
-
-    # DROID 格式（OpenPI DROID policy, joint_vel）:
     python scripts/run_demo.py --droid --policy_server_addr localhost:8000 --task_name PnPCounterToCab
 """
 
@@ -35,7 +22,9 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 
+import imageio
 import numpy as np
 
 from policy_websocket import WebsocketClientPolicy
@@ -55,7 +44,7 @@ from robocasa.utils.run_utils import (
 )
 
 
-def _create_env(args, seed=None, episode_idx=None, use_gui: bool = True):
+def _create_env(args, seed=None, episode_idx=None, use_gui: bool = False):
     """Create a RoboCasa environment for demo (optionally with GUI)."""
     return create_robocasa_env(
         task_name=args.task_name,
@@ -70,8 +59,40 @@ def _create_env(args, seed=None, episode_idx=None, use_gui: bool = True):
     )
 
 
-def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool):
-    """跑一局：等物体稳定后按 max_steps 步循环取 obs -> policy -> step，并可选渲染。"""
+def save_rollout_video(
+    primary_images,
+    secondary_images,
+    wrist_images,
+    episode_idx,
+    success,
+    task_description,
+    output_dir,
+    droid_mode=False,
+):
+    """Save a concatenated MP4 of primary | secondary | wrist camera views.
+    When droid_mode=True, uses primary | wrist only (two-panel).
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    tag = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")[:40]
+    filename = f"episode={episode_idx}--success={success}--task={tag}.mp4"
+    mp4_path = os.path.join(output_dir, filename)
+    writer = imageio.get_writer(mp4_path, fps=30, format="FFMPEG", codec="libx264")
+    if droid_mode:
+        for p, w in zip(primary_images, wrist_images):
+            frame = np.concatenate([p, w], axis=1)
+            writer.append_data(frame)
+    else:
+        for p, s, w in zip(primary_images, secondary_images, wrist_images):
+            frame = np.concatenate([p, s, w], axis=1)
+            writer.append_data(frame)
+    writer.close()
+    print(f"Saved rollout video: {mp4_path}")
+    return mp4_path
+
+
+def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool,
+                save_video: bool = False):
+    """Run one episode: obs -> policy -> step loop with optional rendering."""
     droid = getattr(args, "droid", False)
 
     NUM_WAIT_STEPS = 10
@@ -82,15 +103,24 @@ def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool)
     max_steps = get_task_max_steps(args.task_name, default_horizon=500)
     success = False
     episode_length = 0
+    replay_primary, replay_secondary, replay_wrist = [], [], []
 
     for t in range(max_steps):
         if droid:
             observation = prepare_observation_droid(
                 obs, task_description, flip_images=args.flip_images, img_size=args.img_res
             )
+            if save_video:
+                replay_primary.append(observation["observation/exterior_image_1_left"].copy())
+                replay_secondary.append(observation["observation/exterior_image_1_left"].copy())
+                replay_wrist.append(observation["observation/wrist_image_left"].copy())
         else:
             observation = prepare_observation(obs, flip_images=args.flip_images)
             observation["task_description"] = task_description
+            if save_video:
+                replay_primary.append(observation["primary_image"].copy())
+                replay_secondary.append(observation["secondary_image"].copy())
+                replay_wrist.append(observation["wrist_image"].copy())
 
         start = time.time()
         result = policy.infer(observation)
@@ -114,23 +144,23 @@ def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool)
             break
 
     print(f"  Episode {episode_idx}: {'SUCCESS' if success else 'FAILURE'} (length={episode_length})")
-    return success, episode_length
+    return success, episode_length, replay_primary, replay_secondary, replay_wrist
 
 
 def parse_args():
     all_tasks = list({**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}.keys())
     parser = argparse.ArgumentParser(
-        description="RoboCasa demo: 在仿真中跑 policy 并显示 GUI，不做 eval",
+        description="RoboCasa demo: run policy in sim via WebSocket (no eval)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--policy_server_addr", type=str, default="localhost:8000",
-                        help="WebSocket policy 服务地址 host:port")
+                        help="WebSocket policy server address host:port")
     parser.add_argument("--policy", type=str, default="randomPolicy",
-                        help="Policy 名称（仅用于打印）")
+                        help="Policy name (for display)")
     parser.add_argument("--task_name", type=str, default="PnPCounterToCab",
-                        choices=all_tasks, help="任务名")
+                        choices=all_tasks, help="Task name")
     parser.add_argument("--num_resets", type=int, default=10,
-                        help="重置场景次数（默认 10 次）")
+                        help="Number of scene resets")
     parser.add_argument("--droid", action="store_true",
                         help="Use DROID obs format (joint_vel, OpenPI DROID policy)")
     parser.add_argument("--arm_controller", type=str, default="cartesian_pose",
@@ -146,8 +176,10 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=195)
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--no_deterministic", action="store_false", dest="deterministic")
-    parser.add_argument("--no_gui", action="store_true",
-                        help="关闭 GUI，仅仿真（无窗口）")
+    parser.add_argument("--gui", action="store_true",
+                        help="Enable interactive GUI rendering (default: headless no_gui)")
+    parser.add_argument("--demo_log_dir", type=str, default="./demo_log",
+                        help="Directory for saved videos in no_gui mode")
     return parser.parse_args()
 
 
@@ -161,7 +193,8 @@ def main():
         raise ValueError(f"Unknown task: {args.task_name}. Available: {list(all_tasks.keys())}")
 
     set_seed_everywhere(args.seed, deterministic=args.deterministic)
-    use_gui = not args.no_gui
+    use_gui = args.gui
+    save_video = not use_gui
 
     addr = args.policy_server_addr
     if ":" in addr:
@@ -179,7 +212,13 @@ def main():
     print(f"  arm_controller: {args.arm_controller} ({ARM_CONTROLLER_MAP[args.arm_controller]})")
     print(f"  droid:         {args.droid}")
     print(f"  policy_server: ws://{host}:{port}")
-    print(f"  GUI:          {'on' if use_gui else 'off (--no_gui)'}")
+    print(f"  GUI:          {'on (--gui)' if use_gui else 'off (no_gui, videos saved)'}")
+    if not use_gui:
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(args.demo_log_dir, f"{args.task_name}--{date_str}")
+        os.makedirs(run_dir, exist_ok=True)
+        args._run_dir = run_dir
+        print(f"  demo_log_dir:  {run_dir}")
     print("=" * 60)
 
     policy = WebsocketClientPolicy(host=host, port=port)
@@ -226,7 +265,15 @@ def main():
                 }
                 policy.infer(init_obs)
 
-            run_episode(args, env, task_description, policy, ep_idx, use_gui)
+            success, ep_len, rep_p, rep_s, rep_w = run_episode(
+                args, env, task_description, policy, ep_idx, use_gui, save_video=save_video,
+            )
+            if save_video and rep_p and rep_s and rep_w:
+                save_rollout_video(
+                    rep_p, rep_s, rep_w, ep_idx, success, task_description,
+                    output_dir=getattr(args, "_run_dir", args.demo_log_dir),
+                    droid_mode=args.droid,
+                )
             env.close()
             env = None
     finally:

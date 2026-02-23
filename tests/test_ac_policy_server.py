@@ -9,22 +9,16 @@ Usage:
     python tests/test_ac_policy_server.py --port 8000
 
 Then connect with:
-    python tests/run_demo.py --policy_server_addr localhost:8000 --task_name PnPCounterToCab
-    # or
+    python scripts/run_demo.py --policy_server_addr localhost:8000 --task_name PnPCounterToCab
     python scripts/run_eval.py --policy_server_addr localhost:8000 --task_name PnPCounterToCab
 """
 
 import argparse
 import logging
 import sys
-import os
 from typing import Dict
 
 import numpy as np
-
-_WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _WORKSPACE_ROOT not in sys.path:
-    sys.path.insert(0, _WORKSPACE_ROOT)
 
 from policy_websocket import BasePolicy, WebsocketPolicyServer, ActionChunkBroker
 
@@ -50,7 +44,6 @@ class RandomChunkPolicy(BasePolicy):
             self._action_low = np.array(obs.get("action_low", np.full(self._action_dim, -1.0)))
             self._action_high = np.array(obs.get("action_high", np.full(self._action_dim, 1.0)))
 
-        # Return chunk: (chunk_size, action_dim)
         low = self._action_low * self._scale
         high = self._action_high * self._scale
         actions = np.random.uniform(low, high, (self._chunk_size, self._action_dim)).astype(
@@ -63,13 +56,12 @@ class RandomChunkPolicy(BasePolicy):
 
 
 class ResetOnInitPolicy(BasePolicy):
-    """Wraps a policy to call reset() when receiving episode-init obs (action_dim, no images)."""
+    """Calls reset() when receiving episode-init obs (action_dim only, no images)."""
 
     def __init__(self, policy: BasePolicy):
         self._policy = policy
 
     def infer(self, obs: Dict) -> Dict:
-        # Episode init: action_spec only, no images
         if "action_dim" in obs and "primary_image" not in obs:
             self._policy.reset()
         return self._policy.infer(obs)
