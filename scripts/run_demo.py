@@ -2,18 +2,15 @@
 """
 run_demo.py — Run policy in simulation (no eval).
 
-Connects to a Policy Server over WebSocket for action inference. For demo only:
-- Default: headless (no_gui), saves videos to demo_log/
-- Use --gui for interactive GUI
-- No eval logs or success-rate tracking
+Connects to a Policy Server over WebSocket for action inference.
+Client sends raw robosuite obs; policy server handles all remapping.
+For demo only: no eval logs or success-rate tracking. Default: headless, saves videos to demo_log/.
 
 Usage:
-    python tests/test_random_policy_server.py --port 8000
-
     python scripts/run_demo.py --task_name PnPCounterToCab --policy_server_addr localhost:8000
     python scripts/run_demo.py --gui --task_name PnPCounterToCab --policy_server_addr localhost:8000
-    python scripts/run_demo.py --task_name PnPCounterToCab --arm_controller joint_pos
-    python scripts/run_demo.py --droid --policy_server_addr localhost:8000 --task_name PnPCounterToCab
+    # OpenVLA (7D): --arm_controller cartesian_pose
+    # OpenPI (8D):  --arm_controller joint_vel
 """
 
 import argparse
@@ -36,10 +33,9 @@ from robocasa.utils.run_utils import (
     ARM_CONTROLLER_MAP,
     create_robocasa_env,
     enable_joint_pos_observable,
+    get_expected_policy_action_dim,
     get_task_max_steps,
     pad_action_for_env,
-    prepare_observation,
-    prepare_observation_droid,
     set_seed_everywhere,
 )
 
@@ -67,24 +63,16 @@ def save_rollout_video(
     success,
     task_description,
     output_dir,
-    droid_mode=False,
 ):
-    """Save a concatenated MP4 of primary | secondary | wrist camera views.
-    When droid_mode=True, uses primary | wrist only (two-panel).
-    """
+    """Save a concatenated MP4 of primary | secondary | wrist camera views."""
     os.makedirs(output_dir, exist_ok=True)
     tag = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")[:40]
     filename = f"episode={episode_idx}--success={success}--task={tag}.mp4"
     mp4_path = os.path.join(output_dir, filename)
     writer = imageio.get_writer(mp4_path, fps=30, format="FFMPEG", codec="libx264")
-    if droid_mode:
-        for p, w in zip(primary_images, wrist_images):
-            frame = np.concatenate([p, w], axis=1)
-            writer.append_data(frame)
-    else:
-        for p, s, w in zip(primary_images, secondary_images, wrist_images):
-            frame = np.concatenate([p, s, w], axis=1)
-            writer.append_data(frame)
+    for p, s, w in zip(primary_images, secondary_images, wrist_images):
+        frame = np.concatenate([p, s, w], axis=1)
+        writer.append_data(frame)
     writer.close()
     print(f"Saved rollout video: {mp4_path}")
     return mp4_path
@@ -93,8 +81,6 @@ def save_rollout_video(
 def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool,
                 save_video: bool = False):
     """Run one episode: obs -> policy -> step loop with optional rendering."""
-    droid = getattr(args, "droid", False)
-
     NUM_WAIT_STEPS = 10
     for _ in range(NUM_WAIT_STEPS):
         dummy = np.zeros(env.action_spec[0].shape)
@@ -106,21 +92,14 @@ def run_episode(args, env, task_description, policy, episode_idx, use_gui: bool,
     replay_primary, replay_secondary, replay_wrist = [], [], []
 
     for t in range(max_steps):
-        if droid:
-            observation = prepare_observation_droid(
-                obs, task_description, flip_images=args.flip_images, img_size=args.img_res
-            )
-            if save_video:
-                replay_primary.append(observation["observation/exterior_image_1_left"].copy())
-                replay_secondary.append(observation["observation/exterior_image_1_left"].copy())
-                replay_wrist.append(observation["observation/wrist_image_left"].copy())
-        else:
-            observation = prepare_observation(obs, flip_images=args.flip_images)
-            observation["task_description"] = task_description
-            if save_video:
-                replay_primary.append(observation["primary_image"].copy())
-                replay_secondary.append(observation["secondary_image"].copy())
-                replay_wrist.append(observation["wrist_image"].copy())
+        observation = {**obs, "task_description": task_description}
+        if save_video:
+            p = obs["robot0_agentview_left_image"]
+            s = obs["robot0_agentview_right_image"]
+            w = obs["robot0_eye_in_hand_image"]
+            replay_primary.append(p.copy() if hasattr(p, "copy") else p)
+            replay_secondary.append(s.copy() if hasattr(s, "copy") else s)
+            replay_wrist.append(w.copy() if hasattr(w, "copy") else w)
 
         start = time.time()
         result = policy.infer(observation)
@@ -161,18 +140,14 @@ def parse_args():
                         choices=all_tasks, help="Task name")
     parser.add_argument("--num_resets", type=int, default=10,
                         help="Number of scene resets")
-    parser.add_argument("--droid", action="store_true",
-                        help="Use DROID obs format (joint_vel, OpenPI DROID policy)")
     parser.add_argument("--arm_controller", type=str, default="cartesian_pose",
                         choices=list(ARM_CONTROLLER_MAP.keys()),
-                        help="Arm controller type (ignored when --droid)")
+                        help="cartesian_pose (7D/OpenVLA) or joint_vel (8D/OpenPI)")
     parser.add_argument("--robots", type=str, default="PandaMobile")
     parser.add_argument("--img_res", type=int, default=224)
     parser.add_argument("--obj_instance_split", type=str, default="B")
     parser.add_argument("--layout_and_style_ids", type=str,
                         default="((1,1),(2,2),(4,4),(6,9),(7,10))")
-    parser.add_argument("--flip_images", action="store_true", default=True)
-    parser.add_argument("--no_flip_images", action="store_false", dest="flip_images")
     parser.add_argument("--seed", type=int, default=195)
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--no_deterministic", action="store_false", dest="deterministic")
@@ -185,9 +160,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.droid:
-        args.arm_controller = "joint_vel"
-
     all_tasks = {**SINGLE_STAGE_TASK_DATASETS, **MULTI_STAGE_TASK_DATASETS}
     if args.task_name not in all_tasks:
         raise ValueError(f"Unknown task: {args.task_name}. Available: {list(all_tasks.keys())}")
@@ -210,7 +182,6 @@ def main():
     print(f"  num_resets:   {args.num_resets}")
     print(f"  policy:       {args.policy}")
     print(f"  arm_controller: {args.arm_controller} ({ARM_CONTROLLER_MAP[args.arm_controller]})")
-    print(f"  droid:         {args.droid}")
     print(f"  policy_server: ws://{host}:{port}")
     print(f"  GUI:          {'on (--gui)' if use_gui else 'off (no_gui, videos saved)'}")
     if not use_gui:
@@ -222,7 +193,15 @@ def main():
     print("=" * 60)
 
     policy = WebsocketClientPolicy(host=host, port=port)
-    print(f"Server metadata: {policy.get_server_metadata()}")
+    metadata = policy.get_server_metadata()
+    print(f"Server metadata: {metadata}")
+    policy_dim = metadata.get("action_dim") or metadata.get("action_dims")
+    expected_dim = get_expected_policy_action_dim(args.arm_controller)
+    if policy_dim is not None and int(policy_dim) != expected_dim:
+        raise ValueError(
+            f"arm_controller={args.arm_controller} expects policy action_dim={expected_dim}, "
+            f"but server returns {policy_dim}. Use cartesian_pose for OpenVLA (7D) or joint_vel for OpenPI (8D)."
+        )
 
     env = None
 
@@ -248,22 +227,20 @@ def main():
             seed = args.seed * ep_idx * 256 if args.deterministic else None
             env = _create_env(args, seed=seed, episode_idx=ep_idx, use_gui=use_gui)
             env.reset()
-            if args.droid:
-                enable_joint_pos_observable(env)
+            enable_joint_pos_observable(env)
             task_description = env.get_ep_meta()["lang"]
             print(f"Task: {task_description}")
 
             policy.reset()
             action_low, action_high = env.action_spec
-            if not args.droid:
-                init_obs = {
-                    "action_dim": action_low.shape[0],
-                    "action_low": action_low,
-                    "action_high": action_high,
-                    "task_name": args.task_name,
-                    "task_description": task_description,
-                }
-                policy.infer(init_obs)
+            init_obs = {
+                "action_dim": action_low.shape[0],
+                "action_low": action_low,
+                "action_high": action_high,
+                "task_name": args.task_name,
+                "task_description": task_description,
+            }
+            policy.infer(init_obs)
 
             success, ep_len, rep_p, rep_s, rep_w = run_episode(
                 args, env, task_description, policy, ep_idx, use_gui, save_video=save_video,
@@ -272,7 +249,6 @@ def main():
                 save_rollout_video(
                     rep_p, rep_s, rep_w, ep_idx, success, task_description,
                     output_dir=getattr(args, "_run_dir", args.demo_log_dir),
-                    droid_mode=args.droid,
                 )
             env.close()
             env = None

@@ -150,5 +150,5 @@ robocasa/models/assets/generative_textures
 .vscode/
 .cursor/
 
-.eval_logs/
 eval_logs/
+demo_log/
