@@ -7,44 +7,52 @@ This is the official codebase of RoboCasa, a large-scale simulation framework fo
 [**[Home page]**](https://robocasa.ai) &ensp; [**[Documentation]**](https://robocasa.ai/docs/introduction/overview.html) &ensp; [**[Paper]**](https://robocasa.ai/assets/robocasa_rss24.pdf)
 
 -------
-## Latest updates
-* [10/31/2024] **v0.2**: using RoboSuite `v1.5` as the backend, with improved support for custom robot composition, composite controllers, more teleoperation devices, photo-realistic rendering.
+## Policy WebSocket & installation
+
+This fork integrates **[policy-websocket](https://github.com/YufengJin/policy_websocket)** so you can run RoboCasa with **remote** policies: observations go to a policy server over WebSocket; actions return from another host/GPU. Use it to **benchmark OpenPI vs OpenVLA-OFT** (or other compatible servers) without loading models inside the sim.
+
+| Policy stack | Repo | `scripts/run_demo.py` flags |
+| ------------ | ---- | ----------------------------- |
+| **OpenPI** (π₀ / π₀.₅ DROID) | [YufengJin/openpi](https://github.com/YufengJin/openpi) | `--arm_controller joint_vel` |
+| **OpenVLA-OFT** | [YufengJin/openvla](https://github.com/YufengJin/openvla) | `--arm_controller cartesian_pose` |
+
+**Workflow:** (1) install RoboCasa (**Docker recommended** below), (2) start **openpi** or **openvla** policy server, (3) run demo with `--policy_server_addr HOST:PORT` and matching `--arm_controller`. Full stack: [role-ros2](https://github.com/YufengJin/role-ros2).
+
+```bash
+# Inside environment / container, from repo root:
+micromamba activate robocasa   # Docker only; skip if using conda below
+python scripts/run_demo.py --arm_controller joint_vel --policy_server_addr HOST:PORT --task_name PnPCounterToCab      # OpenPI
+python scripts/run_demo.py --arm_controller cartesian_pose --policy_server_addr HOST:PORT --task_name PnPCounterToCab  # OpenVLA-OFT
+```
+
+### Installation (Docker, recommended)
+
+Requires Docker, Docker Compose, and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
+```bash
+git clone https://github.com/YufengJin/robocasa.git
+cd robocasa
+docker compose -f docker/docker-compose.headless.yaml up --build -d
+docker exec -it robocasa_container bash
+# In container: micromamba activate robocasa  (already in .bashrc)
+# Entrypoint installs editable robocasa + policy-websocket deps and kitchen assets on first start.
+```
+
+GUI / MuJoCo windows: `xhost +local:docker` then `docker compose -f docker/docker-compose.x11.yaml up --build -d`. Full options: **[docker/README.md](docker/README.md)**.
+
+### Installation (conda, optional)
+
+Host-native setup without Docker:
+
+1. `conda create -c conda-forge -n robocasa python=3.10` → `conda activate robocasa`
+2. Clone [robosuite](https://github.com/ARISE-Initiative/robosuite) (master), `pip install -e .`
+3. Clone this repo ([YufengJin/robocasa](https://github.com/YufengJin/robocasa) fork; upstream [robocasa/robocasa](https://github.com/robocasa/robocasa)), `cd robocasa`, `pip install -e .` (includes `policy-websocket` via `setup.py`)
+4. `python robocasa/scripts/download_kitchen_assets.py` (~5GB), `python robocasa/scripts/setup_macros.py`
+5. Optional: `pip install pre-commit; pre-commit install`
 
 -------
-## Installation
-RoboCasa works across all major computing platforms. The easiest way to set up is through the [Anaconda](https://www.anaconda.com/) package management system. Follow the instructions below to install:
-1. Set up conda environment:
-
-   ```sh
-   conda create -c conda-forge -n robocasa python=3.10
-   ```
-2. Activate conda environment:
-   ```sh
-   conda activate robocasa
-   ```
-3. Clone and setup robosuite dependency (**important: use the master branch!**):
-
-   ```sh
-   git clone https://github.com/ARISE-Initiative/robosuite
-   cd robosuite
-   pip install -e .
-   ```
-4. Clone and setup this repo:
-
-   ```sh
-   cd ..
-   git clone https://github.com/robocasa/robocasa
-   cd robocasa
-   pip install -e .
-   pip install pre-commit; pre-commit install           # Optional: set up code formatter.
-
-   (optional: if running into issues with numba/numpy, run: conda install -c numba numba=0.56.4 -y)
-   ```
-5. Install the package and download assets:
-   ```sh
-   python robocasa/scripts/download_kitchen_assets.py   # Caution: Assets to be downloaded are around 5GB.
-   python robocasa/scripts/setup_macros.py              # Set up system variables.
-   ```
+## Latest updates
+* [10/31/2024] **v0.2**: using RoboSuite `v1.5` as the backend, with improved support for custom robot composition, composite controllers, more teleoperation devices, photo-realistic rendering.
 
 -------
 ## Quick start
