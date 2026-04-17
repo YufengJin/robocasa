@@ -11,8 +11,6 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ../:/workspace
-      # - /home/yjin/repos/cosmos-policy:/cosmos-policy
-      # - /home/yjin/repos/robocasa/datasets:/workspace/datasets
     working_dir: /workspace
     stdin_open: true
     tty: true

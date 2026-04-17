@@ -1,0 +1,48 @@
+[project]
+name = "robocasa"
+version = "0.2.0"
+description = "RoboCasa: Large-Scale Simulation of Household Tasks for Generalist Robots"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+authors = [
+    { name = "Soroush Nasiriany", email = "soroush@cs.utexas.edu" },
+]
+dependencies = [
+    "numpy==1.23.3",
+    "numba==0.56.4",
+    "scipy>=1.2.3",
+    "mujoco==3.2.6",
+    "pygame",
+    "Pillow",
+    "opencv-python",
+    "pyyaml",
+    "pynput",
+    "tqdm",
+    "termcolor",
+    "imageio[ffmpeg]",
+    "h5py",
+    "lxml",
+    "hidapi",
+    "tianshou==0.4.10",
+    "policy-websocket @ git+https://github.com/YufengJin/policy_websocket.git",
+    "torch==2.4.0",
+    "torchvision==0.19.0",
+    "torchaudio==2.4.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["robocasa*"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu118" }
+torchvision = { index = "pytorch-cu118" }
+torchaudio = { index = "pytorch-cu118" }
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true

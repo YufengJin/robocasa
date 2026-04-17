@@ -125,7 +125,7 @@ docker rm robocasa_container
 Inside the container:
 
 ```bash
-micromamba activate robocasa
+# The uv-managed venv at /opt/venv is already on PATH — just use `python` directly.
 
 # Demos
 python -m robocasa.demos.demo_kitchen_scenes

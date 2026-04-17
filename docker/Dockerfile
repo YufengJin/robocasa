@@ -1,16 +1,17 @@
 # =========================================================
-# RoboCasa Dockerfile (Micromamba-based, GPU-ready)
+# RoboCasa Dockerfile (uv-based, GPU-ready)
 # =========================================================
-
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV MAMBA_ROOT_PREFIX=/opt/conda
-ENV PATH=$MAMBA_ROOT_PREFIX/bin:$PATH
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV UV_LINK_MODE=copy
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:/root/.local/bin:$PATH
 
 # ---------------------------------------------------------
-# System dependencies (SSL is CRITICAL) + debug tools
+# System dependencies (uv cannot install these)
 # ---------------------------------------------------------
 RUN apt-get update && apt-get install -y \
     curl \
@@ -32,59 +33,38 @@ RUN apt-get update && apt-get install -y \
     tmux \
     vim \
     x11-apps \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------
-# Install Micromamba
+# Install uv (copy static binary from official image)
 # ---------------------------------------------------------
-RUN curl -Ls https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64 -o /usr/bin/micromamba \
- && chmod +x /usr/bin/micromamba
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # ---------------------------------------------------------
-# Create conda environment
+# Create Python 3.10 venv managed by uv
 # ---------------------------------------------------------
-RUN micromamba create -y -n robocasa python=3.10 -c conda-forge \
- && micromamba clean -a -y
+RUN uv venv /opt/venv --python 3.10
 
 # ---------------------------------------------------------
-# Configure shell hook for micromamba
-# ---------------------------------------------------------
-RUN /bin/bash -c "micromamba shell init -s bash" \
- && echo "micromamba activate robocasa" >> /root/.bashrc
-
-# ---------------------------------------------------------
-# Upgrade pip
-# ---------------------------------------------------------
-RUN micromamba run -n robocasa python -m pip install --upgrade pip
-
-# ---------------------------------------------------------
-# Install PyTorch (CUDA 11.8)
-# ---------------------------------------------------------
-RUN micromamba run -n robocasa python -m pip install torch==2.4.0 \
-    torchvision==0.19.0 \
-    torchaudio==2.4.0 \
-    --index-url https://download.pytorch.org/whl/cu118
-
-
-RUN micromamba run -n robocasa python -m pip install "imageio[ffmpeg]" 
-
-# ---------------------------------------------------------
-# Install robosuite v1.5.2 to /opt/third_party/ (required dependency)
-# ---------------------------------------------------------
-RUN mkdir -p /opt/third_party && \
-    micromamba run -n robocasa bash -c "\
-    git clone https://github.com/ARISE-Initiative/robosuite.git /opt/third_party/robosuite && \
-    cd /opt/third_party/robosuite && \
-    git checkout v1.5.2 && \
-    pip install -e ."
-
-# ---------------------------------------------------------
-# Set up workspace directory (robocasa installed in entrypoint for in-container dev)
+# Pre-install project dependencies (leverages Docker layer cache)
+# Only pyproject.toml + uv.lock are copied so this layer is
+# re-used unless dependencies change.
 # ---------------------------------------------------------
 WORKDIR /workspace
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
 
 # ---------------------------------------------------------
-# Entrypoint
+# Install robosuite v1.5.2 (editable) to /opt/third_party/
+# ---------------------------------------------------------
+RUN mkdir -p /opt/third_party \
+ && git clone https://github.com/ARISE-Initiative/robosuite.git /opt/third_party/robosuite \
+ && cd /opt/third_party/robosuite \
+ && git checkout v1.5.2 \
+ && uv pip install -e .
+
+# ---------------------------------------------------------
+# Entrypoint (robocasa itself is installed editable at container start)
 # ---------------------------------------------------------
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
