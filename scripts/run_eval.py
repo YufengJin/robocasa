@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import atexit
+import gc
 import os
 import signal
 import sys
@@ -85,7 +86,8 @@ def save_rollout_video(
     return mp4_path
 
 
-def run_episode(args, env, task_description, policy, episode_idx, log_file=None):
+def run_episode(args, env, task_description, policy, episode_idx, log_file=None,
+                save_video: bool = True):
     """Run a single evaluation episode via WebSocket policy.infer()."""
     NUM_WAIT_STEPS = 10
     for _ in range(NUM_WAIT_STEPS):
@@ -99,12 +101,13 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None)
 
     for t in range(max_steps):
         observation = {**obs, "task_description": task_description}
-        p = obs["robot0_agentview_left_image"]
-        s = obs["robot0_agentview_right_image"]
-        w = obs["robot0_eye_in_hand_image"]
-        replay_primary.append(p.copy() if hasattr(p, "copy") else p)
-        replay_secondary.append(s.copy() if hasattr(s, "copy") else s)
-        replay_wrist.append(w.copy() if hasattr(w, "copy") else w)
+        if save_video:
+            p = obs["robot0_agentview_left_image"]
+            s = obs["robot0_agentview_right_image"]
+            w = obs["robot0_eye_in_hand_image"]
+            replay_primary.append(p.copy() if hasattr(p, "copy") else p)
+            replay_secondary.append(s.copy() if hasattr(s, "copy") else s)
+            replay_wrist.append(w.copy() if hasattr(w, "copy") else w)
 
         start = time.time()
         result = policy.infer(observation)
@@ -164,16 +167,19 @@ def run_task(args, policy, log_file=None):
         policy.infer(init_obs)
 
         success, length, rep_p, rep_s, rep_w = run_episode(
-            args, env, task_description, policy, ep_idx, log_file
+            args, env, task_description, policy, ep_idx, log_file,
+            save_video=args.save_video,
         )
         successes.append(success)
         lengths.append(length)
-        if args.save_video:
+        if args.save_video and rep_p and rep_s and rep_w:
             save_rollout_video(
                 rep_p, rep_s, rep_w,
                 ep_idx, success, task_description,
                 output_dir=args.log_dir,
             )
+        del rep_p, rep_s, rep_w
+        gc.collect()
 
         env.close()
 

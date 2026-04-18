@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import atexit
+import gc
 import os
 import signal
 import sys
@@ -262,6 +263,8 @@ def main():
                     rep_p, rep_s, rep_w, ep_idx, success, task_description,
                     output_dir=getattr(args, "_run_dir", args.demo_log_dir),
                 )
+            del rep_p, rep_s, rep_w
+            gc.collect()
             env.close()
             env = None
     finally:
