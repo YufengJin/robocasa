@@ -245,6 +245,18 @@ def main():
     if args.task_name not in all_tasks:
         raise ValueError(f"Unknown task: {args.task_name}. Available: {list(all_tasks.keys())}")
 
+    if args.arm_controller in ("joint_pos", "joint_vel"):
+        print("=" * 60)
+        print("  *** WARNING: UNOFFICIAL CONTROLLER (BETA) ***")
+        print(f"  arm_controller='{args.arm_controller}' is NOT the official")
+        print("  RoboCasa controller and does NOT match the action space")
+        print("  of the official RoboCasa datasets (which use cartesian_pose /")
+        print("  OSC_POSE delta mode).")
+        print("  This controller is in BETA and was added solely to support")
+        print("  compatibility with DROID datasets. Evaluation results may")
+        print("  not be comparable to the official benchmark.")
+        print("=" * 60)
+
     set_seed_everywhere(args.seed, deterministic=args.deterministic)
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join(args.log_dir, f"{args.task_name}--{date_str}")
