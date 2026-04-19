@@ -2,8 +2,6 @@
 Client sends raw robosuite obs; policy server handles all remapping."""
 
 import ast
-import os
-import random
 from typing import Dict, Optional
 
 import numpy as np
@@ -145,14 +143,6 @@ def enable_joint_pos_observable(env) -> None:
         if "joint_pos" in ob_name:
             env.modify_observable(observable_name=ob_name, attribute="active", modifier=True)
             break
-
-
-def set_seed_everywhere(seed: int, deterministic: bool = True) -> None:
-    """Set global random seeds for reproducibility."""
-    if deterministic:
-        os.environ["DETERMINISTIC"] = "True"
-    random.seed(seed)
-    np.random.seed(seed)
 
 
 def pad_action_for_env(

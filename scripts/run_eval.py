@@ -36,7 +36,6 @@ from robocasa.utils.run_utils import (
     get_expected_policy_action_dim,
     get_task_max_steps,
     pad_action_for_env,
-    set_seed_everywhere,
 )
 
 
@@ -147,7 +146,7 @@ def run_task(args, policy, log_file=None):
     for ep_idx in range(args.num_trials):
         log(f"\n--- Episode {ep_idx + 1}/{args.num_trials} ---", log_file)
 
-        seed = args.seed * ep_idx * 256 if args.deterministic else None
+        seed = args.seed + ep_idx
         env = _create_env(args, seed=seed, episode_idx=ep_idx)
         env.reset()
         enable_joint_pos_observable(env)
@@ -230,10 +229,7 @@ def parse_args():
                         default="((1,1),(2,2),(4,4),(6,9),(7,10))",
                         help="Layout and style IDs for scene selection")
     parser.add_argument("--seed", type=int, default=195,
-                        help="Random seed")
-    parser.add_argument("--deterministic", action="store_true", default=True,
-                        help="Use deterministic seeding")
-    parser.add_argument("--no_deterministic", action="store_false", dest="deterministic")
+                        help="Random seed (controls robosuite rng: object placement, camera jitter, layout/style, textures)")
     parser.add_argument("--log_dir", type=str, default="./eval_logs",
                         help="Directory for logs and rollout videos")
     parser.add_argument("--save_video", action="store_true", default=True,
@@ -263,7 +259,6 @@ def main():
         print("  not be comparable to the official benchmark.")
         print("=" * 60)
 
-    set_seed_everywhere(args.seed, deterministic=args.deterministic)
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join(args.log_dir, f"{args.task_name}--{date_str}")
     os.makedirs(run_dir, exist_ok=True)
@@ -278,7 +273,6 @@ def main():
     log(f"  task_name:         {args.task_name}", log_file)
     log(f"  num_trials:        {args.num_trials}", log_file)
     log(f"  seed:              {args.seed}", log_file)
-    log(f"  deterministic:     {args.deterministic}", log_file)
     log(f"  policy_server:     {args.policy_server_addr}", log_file)
     log(f"  log_dir (run_dir): {run_dir}", log_file)
     log(f"  img_res:           {args.img_res}", log_file)

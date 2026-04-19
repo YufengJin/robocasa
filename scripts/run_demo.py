@@ -37,7 +37,6 @@ from robocasa.utils.run_utils import (
     get_expected_policy_action_dim,
     get_task_max_steps,
     pad_action_for_env,
-    set_seed_everywhere,
 )
 
 
@@ -149,9 +148,8 @@ def parse_args():
     parser.add_argument("--obj_instance_split", type=str, default="B")
     parser.add_argument("--layout_and_style_ids", type=str,
                         default="((1,1),(2,2),(4,4),(6,9),(7,10))")
-    parser.add_argument("--seed", type=int, default=195)
-    parser.add_argument("--deterministic", action="store_true", default=True)
-    parser.add_argument("--no_deterministic", action="store_false", dest="deterministic")
+    parser.add_argument("--seed", type=int, default=195,
+                        help="Random seed (controls robosuite rng: object placement, camera jitter, layout/style, textures)")
     parser.add_argument("--gui", action="store_true",
                         help="Enable interactive GUI rendering (default: headless no_gui)")
     parser.add_argument("--demo_log_dir", type=str, default="./demo_log",
@@ -177,7 +175,6 @@ def main():
         print("  not be comparable to the official benchmark.")
         print("=" * 60)
 
-    set_seed_everywhere(args.seed, deterministic=args.deterministic)
     use_gui = args.gui
     save_video = not use_gui
 
@@ -237,7 +234,7 @@ def main():
     try:
         for ep_idx in range(args.num_resets):
             print(f"\n--- Reset {ep_idx + 1}/{args.num_resets} ---")
-            seed = args.seed * ep_idx * 256 if args.deterministic else None
+            seed = args.seed + ep_idx
             env = _create_env(args, seed=seed, episode_idx=ep_idx, use_gui=use_gui)
             env.reset()
             enable_joint_pos_observable(env)
