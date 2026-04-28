@@ -8,6 +8,12 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV UV_LINK_MODE=copy
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
 ENV VIRTUAL_ENV=/opt/venv
+# uv sync defaults to .venv in the project dir; pin to the pre-created venv at
+# /opt/venv so the source bind-mount onto /workspace/ does not hide it at runtime.
+# Same layout as LIBERO/loco-mujoco. Without this line, runtime falls back to a
+# torch reinstall via `uv pip install -e .` which has triggered torch wheel
+# installation issues (missing torch/_vendor in 2.4.0+cu118).
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 ENV PATH=/opt/venv/bin:/root/.local/bin:$PATH
 
 # ---------------------------------------------------------
