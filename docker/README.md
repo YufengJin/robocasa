@@ -1,152 +1,68 @@
-# RoboCasa Docker Guide
-
-This document describes how to build and run RoboCasa containers.
+# Docker Setup for robocasa
 
 ## Prerequisites
 
-- Docker and Docker Compose installed
-- NVIDIA Docker runtime configured (for GPU support)
-- For X11 mode: X11 server running on the host
-
-## Build Image
-
-From the project root:
+Run the prerequisite checker — it verifies Docker, Compose plugin, and the NVIDIA driver + Container Toolkit:
 
 ```bash
-cd docker
-docker-compose -f docker-compose.x11.yaml build
-# or
-docker-compose -f docker-compose.headless.yaml build
+bash docker/check_prereqs.sh
 ```
 
-With custom image name:
+If any check fails, the script prints an install link and exits non-zero.
+
+Manual install references:
+
+- Docker Engine — https://docs.docker.com/engine/install/
+- NVIDIA Container Toolkit — https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+- NVIDIA GPU driver — https://www.nvidia.com/en-us/drivers/
+
+## Dependencies (uv)
+
+Runtime versions are pinned in `pyproject.toml` and `uv.lock`. Refresh the lockfile after editing dependencies:
 
 ```bash
-IMAGE=robocasa:custom docker-compose -f docker-compose.x11.yaml build
+uv lock
 ```
 
-## Start Container
+Docker installs the locked environment with `uv sync --frozen --no-install-project` (see `docker/Dockerfile`).
 
-### X11 mode (GUI display)
+## Build
 
-For visualization:
+From project root:
 
 ```bash
-cd docker
-DISPLAY=${DISPLAY} docker-compose -f docker-compose.x11.yaml up -d
+docker compose -f docker/docker-compose.headless.yaml build
 ```
 
-Or foreground:
+## Volume mounts
+
+Update paths in the compose file to match your system.
+
+| Container path | Purpose |
+|----------------|---------|
+| `../` → `/workspace/robocasa` | Project (editable install) |
+| `${HOME}/.cache/huggingface` | HF model cache |
+
+## Usage
+
+### Headless (training / serving)
 
 ```bash
-DISPLAY=${DISPLAY} docker-compose -f docker-compose.x11.yaml up
+docker compose -f docker/docker-compose.headless.yaml up -d
+docker exec -it robocasa-headless bash
 ```
 
-### Headless mode
-
-For training, batch evaluation, or other non-GUI use:
+### X11 (GUI)
 
 ```bash
-cd docker
-docker-compose -f docker-compose.headless.yaml up -d
+xhost +local:
+docker compose -f docker/docker-compose.x11.yaml up -d
+docker exec -it robocasa-gui bash
 ```
 
-Or foreground:
+## Entrypoint
 
-```bash
-docker-compose -f docker-compose.headless.yaml up
-```
+On each start:
 
-## Attach to Container
-
-```bash
-docker exec -it robocasa_container bash
-```
-
-## Stop Container
-
-```bash
-cd docker
-docker-compose -f docker-compose.x11.yaml down
-# or
-docker-compose -f docker-compose.headless.yaml down
-```
-
-## View Logs
-
-```bash
-docker logs robocasa_container
-# or follow
-docker logs -f robocasa_container
-```
-
-## Configuration
-
-### Container name
-- Fixed name: `robocasa_container`
-
-### GPU
-- Uses all available NVIDIA GPUs by default
-- Set `GPU` env var to override (default: `all`)
-
-### Working directory
-- Container workdir: `/workspace`
-
-### Network
-- Uses `host` network mode
-
-### Environment variables
-- **DISPLAY** (X11 only): X11 display
-- **GPU**: GPU selection (default: `all`)
-
-## Troubleshooting
-
-### X11 permission denied
-
-```bash
-xhost +local:docker
-```
-
-### GPU not detected
-
-```bash
-docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu20.04 nvidia-smi
-```
-
-### Container name conflict
-
-```bash
-docker stop robocasa_container
-docker rm robocasa_container
-```
-
-## Example Usage
-
-Inside the container:
-
-```bash
-# The uv-managed venv at /opt/venv is already on PATH — just use `python` directly.
-
-# Demos
-python -m robocasa.demos.demo_kitchen_scenes
-python -m robocasa.demos.demo_tasks
-python -m robocasa.demos.demo_objects
-python -m robocasa.demos.demo_teleop
-
-# Download assets (if not done at build)
-python robocasa/scripts/download_kitchen_assets.py
-
-# Download datasets
-python robocasa/scripts/download_datasets.py --ds_types human_im
-
-# Run eval (start policy server first in another terminal)
-python tests/test_random_policy_server.py --port 8000
-python scripts/run_eval.py --task_name PnPCounterToCab --policy_server_addr localhost:8000
-```
-
-## Notes
-
-- X11 mode requires a running X server and `xhost` access for Docker
-- First build can take a while (dependencies and assets)
-- `/workspace` contains robocasa and robosuite source
-- Add volume mounts in docker-compose for persistent data
+1. Uses uv-managed venv at `/opt/venv` (Python 3.10)
+2. When `pyproject.toml` is present: `uv pip install -e .` (deps already synced in the image)

@@ -1,0 +1,51 @@
+{
+  "primary_install_strategy": "uv-sync-frozen",
+  "system_apt_packages": [
+    "curl", "bzip2", "ca-certificates", "git", "build-essential",
+    "libgl1", "libglib2.0-0", "libx11-6", "libxext6", "libxrender1",
+    "libsm6", "libegl1", "libosmesa6", "ffmpeg", "lsof", "psmisc",
+    "tmux", "vim", "x11-apps"
+  ],
+  "third_party_clones": [],
+  "installation_steps": [
+    {
+      "kind": "uv_sync",
+      "args": ["--frozen", "--no-install-project"]
+    },
+    {
+      "kind": "shell",
+      "cmd": "mkdir -p /opt/third_party && git clone https://github.com/ARISE-Initiative/robosuite.git /opt/third_party/robosuite && cd /opt/third_party/robosuite && git checkout v1.5.2 && uv pip install -e ."
+    }
+  ],
+  "post_install_hooks": [
+    {
+      "kind": "shell",
+      "cmd": "if ([ -f /workspace/robocasa/pyproject.toml ] || [ -f /workspace/robocasa/setup.py ]) && ! python -c 'import robocasa.macros_private' 2>/dev/null; then echo 'Setting up private macros...'; python /workspace/robocasa/scripts/setup_macros.py; fi",
+      "when": "every_run"
+    },
+    {
+      "kind": "shell",
+      "cmd": "ROBOCASA_ASSETS=\"${ROBOCASA_ASSETS:-/workspace/robocasa/robocasa/models/assets}\"; if [ ! -d \"${ROBOCASA_ASSETS}/textures\" ] || [ -z \"$(ls -A \"${ROBOCASA_ASSETS}/textures\" 2>/dev/null)\" ]; then echo 'Downloading kitchen assets (~5GB)...'; yes | python /workspace/robocasa/robocasa/scripts/download_kitchen_assets.py; else echo 'Kitchen assets already present, skipping.'; fi",
+      "when": "every_run"
+    }
+  ],
+  "runtime_mounts": [],
+  "runtime_env_vars": [],
+  "evidence": {
+    "readme_quotes": [
+      "Clone robosuite (master), `pip install -e .` — from docs/introduction/installation.md step 3",
+      "Clone this repo ... `cd robocasa`, `pip install -e .` — from docs/introduction/installation.md step 4",
+      "`python robocasa/scripts/download_kitchen_assets.py` (~5GB) — from docs/introduction/installation.md step 5",
+      "`python robocasa/scripts/setup_macros.py` — from docs/introduction/installation.md step 5",
+      "uv.lock present at repo root with torch==2.4.0+cu118 — pyproject.toml [tool.uv.sources] torch = { index = 'pytorch-cu118' }",
+      "The latest version of RoboCasa uses the master branch of robosuite — docs/introduction/installation.md",
+      "This fork integrates policy-websocket so you can run RoboCasa with remote policies — README.md"
+    ],
+    "ambiguities": [
+      "README says 'master branch of robosuite' but the verified build pinned v1.5.2 (git tag). Keeping v1.5.2 for reproducibility — the prior run confirmed env built in 8.9s with this pin.",
+      "Ubuntu version: probe defaults to 22.04 but existing Dockerfile uses 20.04 (ubuntu20.04 is required because robosuite v1.5.2 was tested/verified on that base in the prior run). Keeping ubuntu20.04 via probe.json override.",
+      "needs_render_libs quirk: libegl1 and libosmesa6 are already in the explicit apt list — no separate injection needed.",
+      "policy-websocket dependency is declared in pyproject.toml and pulled by uv sync — no separate installation step needed."
+    ]
+  }
+}

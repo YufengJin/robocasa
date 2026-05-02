@@ -1,0 +1,228 @@
+{
+  "benchmark_name": "robocasa",
+  "schema_version": 1,
+  "captured_at": "2026-05-02T07:11:05+00:00",
+  "captured_from": {
+    "repo_path": "/home/yjin/repos/robocasa",
+    "env_id": "PnPCounterToCab",
+    "make_expr": "create_robocasa_env(task_name='PnPCounterToCab', robots='PandaMobile', arm_controller='cartesian_pose', img_res=128, obj_instance_split='B', layout_and_style_ids='((1,1),)', seed=0, episode_idx=0, use_gui=False)",
+    "category": "IL"
+  },
+  "obs_spec": {
+    "robot0_joint_pos": {
+      "dtype": "float64",
+      "shape": [
+        7
+      ],
+      "kind": "proprio_joint"
+    },
+    "robot0_joint_pos_cos": {
+      "dtype": "float64",
+      "shape": [
+        7
+      ],
+      "kind": "proprio_joint"
+    },
+    "robot0_joint_pos_sin": {
+      "dtype": "float64",
+      "shape": [
+        7
+      ],
+      "kind": "proprio_joint"
+    },
+    "robot0_joint_vel": {
+      "dtype": "float64",
+      "shape": [
+        7
+      ],
+      "kind": "proprio_velocity"
+    },
+    "robot0_joint_acc": {
+      "dtype": "float64",
+      "shape": [
+        7
+      ],
+      "kind": "proprio_other"
+    },
+    "robot0_eef_pos": {
+      "dtype": "float64",
+      "shape": [
+        3
+      ],
+      "kind": "proprio_pos"
+    },
+    "robot0_eef_quat": {
+      "dtype": "float64",
+      "shape": [
+        4
+      ],
+      "kind": "proprio_quat",
+      "notes": "xyzw layout (robosuite/mujoco convention)"
+    },
+    "robot0_eef_quat_site": {
+      "dtype": "float32",
+      "shape": [
+        4
+      ],
+      "kind": "proprio_quat",
+      "notes": "xyzw layout (robosuite/mujoco convention)"
+    },
+    "robot0_gripper_qpos": {
+      "dtype": "float64",
+      "shape": [
+        2
+      ],
+      "kind": "proprio_gripper"
+    },
+    "robot0_gripper_qvel": {
+      "dtype": "float64",
+      "shape": [
+        2
+      ],
+      "kind": "proprio_velocity"
+    },
+    "robot0_base_pos": {
+      "dtype": "float64",
+      "shape": [
+        3
+      ],
+      "kind": "proprio_pos"
+    },
+    "robot0_base_quat": {
+      "dtype": "float32",
+      "shape": [
+        4
+      ],
+      "kind": "proprio_quat",
+      "notes": "xyzw layout (robosuite/mujoco convention)"
+    },
+    "robot0_base_to_eef_pos": {
+      "dtype": "float64",
+      "shape": [
+        3
+      ],
+      "kind": "proprio_pos"
+    },
+    "robot0_base_to_eef_quat": {
+      "dtype": "float32",
+      "shape": [
+        4
+      ],
+      "kind": "proprio_quat",
+      "notes": "xyzw layout (robosuite/mujoco convention)"
+    },
+    "robot0_base_to_eef_quat_site": {
+      "dtype": "float32",
+      "shape": [
+        4
+      ],
+      "kind": "proprio_quat",
+      "notes": "xyzw layout (robosuite/mujoco convention)"
+    },
+    "robot0_agentview_left_image": {
+      "dtype": "uint8",
+      "shape": [
+        128,
+        128,
+        3
+      ],
+      "kind": "image_primary"
+    },
+    "robot0_agentview_right_image": {
+      "dtype": "uint8",
+      "shape": [
+        128,
+        128,
+        3
+      ],
+      "kind": "image_primary"
+    },
+    "robot0_eye_in_hand_image": {
+      "dtype": "uint8",
+      "shape": [
+        128,
+        128,
+        3
+      ],
+      "kind": "image_wrist"
+    },
+    "robot0_proprio-state": {
+      "dtype": "float64",
+      "shape": [
+        68
+      ],
+      "kind": "proprio_other"
+    }
+  },
+  "action_spec": {
+    "shape": [
+      11
+    ],
+    "dtype": "float64",
+    "low": [
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0,
+      -1.0
+    ],
+    "high": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "controller": "CompositeController(right=OperationalSpaceController, right_gripper=SimpleGripController, base=MobileBaseJointVelocityController, torso=JointPositionController)",
+    "components": [
+      "right_0",
+      "right_1",
+      "right_2",
+      "right_3",
+      "right_4",
+      "right_5",
+      "right_gripper_0",
+      "right_gripper_1",
+      "base_0",
+      "base_1",
+      "base_2",
+      "torso"
+    ],
+    "gripper_convention": {
+      "open": -1,
+      "close": 1,
+      "binary": true,
+      "index": 6
+    }
+  },
+  "task_description_source": "<UNKNOWN>",
+  "step_signature": "4-tuple",
+  "smoke_test_passed": true,
+  "dropped_task_specific_keys": [
+    "obj_pos",
+    "obj_quat",
+    "obj_to_robot0_eef_pos",
+    "obj_to_robot0_eef_quat",
+    "distr_counter_pos",
+    "distr_counter_quat",
+    "distr_counter_to_robot0_eef_pos",
+    "distr_counter_to_robot0_eef_quat",
+    "distr_cab_pos",
+    "distr_cab_quat",
+    "distr_cab_to_robot0_eef_pos",
+    "distr_cab_to_robot0_eef_quat",
+    "object-state"
+  ]
+}

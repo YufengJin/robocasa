@@ -3,10 +3,10 @@
 Test policy server for RoboCasa — returns random actions via WebSocket.
 
 Usage:
-    python tests/test_random_policy_server.py --port 8000
+    python tests/test_random_policy_server.py --port 8765
 
 Then connect with:
-    python scripts/run_demo.py --policy_server_addr localhost:8000 --task_name PnPCounterToCab
+    python scripts/run_demo.py --policy_server_addr localhost:8765 --task_name PnPCounterToCab
 """
 
 import argparse
@@ -49,7 +49,7 @@ class RandomPolicy(BasePolicy):
 def main():
     parser = argparse.ArgumentParser(description="RoboCasa test policy server (random actions)")
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
     policy = RandomPolicy()

@@ -100,6 +100,13 @@ def run_episode(args, env, task_description, policy, episode_idx, log_file=None,
 
     for t in range(max_steps):
         observation = {**obs, "task_description": task_description}
+        observation["__meta__"] = {
+            "v": 1,
+            "benchmark": "robocasa",
+            "task": str(args.task_name),
+            "task_description": task_description,
+            "phase": "step",
+        }
         if save_video:
             p = obs["robot0_agentview_left_image"]
             s = obs["robot0_agentview_right_image"]
@@ -163,6 +170,13 @@ def run_task(args, policy, log_file=None):
             "task_name": args.task_name,
             "task_description": task_description,
         }
+        init_obs["__meta__"] = {
+            "v": 1,
+            "benchmark": "robocasa",
+            "task": str(args.task_name),
+            "task_description": task_description,
+            "phase": "init",
+        }
         policy.infer(init_obs)
 
         success, length, rep_p, rep_s, rep_w = run_episode(
@@ -207,7 +221,7 @@ def parse_args():
         description="RoboCasa WebSocket evaluation client",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--policy_server_addr", type=str, default="localhost:8000",
+    parser.add_argument("--policy_server_addr", type=str, default="localhost:8765",
                         help="Address of the WebSocket policy server (host:port)")
     parser.add_argument("--policy", type=str, default="randomPolicy",
                         help="Policy name for logging (e.g. randomPolicy, cosmos)")
@@ -288,7 +302,7 @@ def main():
         host, port = addr.rsplit(":", 1)
         port = int(port)
     else:
-        host, port = addr, 8000
+        host, port = addr, 8765
 
     log(f"Connecting to policy server at ws://{host}:{port} ...", log_file)
     policy = WebsocketClientPolicy(host=host, port=port)
