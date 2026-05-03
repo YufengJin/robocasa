@@ -19,18 +19,13 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 # 1. System dependencies
 # -----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-    curl wget tar procps bzip2 ca-certificates git build-essential cmake unzip tmux \
-    ffmpeg libgl1-mesa-glx libglib2.0-0 \
-    curl bzip2 ca-certificates git build-essential libgl1 libglib2.0-0 libx11-6 libxext6 libxrender1 libsm6 libegl1 libosmesa6 ffmpeg lsof psmisc tmux vim x11-apps \
+    curl wget tar procps bzip2 ca-certificates git build-essential cmake unzip \
+    ffmpeg libgl1 libgl1-mesa-glx libglib2.0-0 \
+    libx11-6 libxext6 libxrender1 libsm6 libegl1 libosmesa6 \
+    lsof psmisc tmux vim x11-apps \
     && rm -rf /var/lib/apt/lists/*
 
 
-
-# 
-# Uncomment if project needs MuJoCo / robosuite / EGL rendering:
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     libx11-6 libxext6 libxrender1 libsm6 libegl1 libosmesa6 \
-#     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
 # 2. uv (fast Python package manager)
