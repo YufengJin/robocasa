@@ -24,7 +24,7 @@ dependencies = [
     "lxml",
     "hidapi",
     "tianshou==0.4.10",
-    "policy-websocket @ git+https://github.com/YufengJin/policy_websocket.git",
+    "policy-websocket @ git+https://github.com/YufengJin/policy_websocket.git@main",
     "torch==2.4.0",
     "torchvision==0.19.0",
     "torchaudio==2.4.0",

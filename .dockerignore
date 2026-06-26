@@ -1,0 +1,8 @@
+# 保留 robocasa/(含 models/assets 厨房素材)、scripts/、pyproject.toml、uv.lock —— 它们要烤进镜像。
+# 排除无关/会重生成的内容，避免污染 /workspace/robocasa 与膨胀构建上下文。
+.git
+robocasa.egg-info
+eval_logs
+docs
+**/__pycache__
+**/*.pyc

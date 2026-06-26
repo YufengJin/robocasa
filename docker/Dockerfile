@@ -32,6 +32,9 @@ RUN apt-get update && apt-get install -y \
 # -----------------------------------------------------------------------------
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
+# 运行时常见把宿主机目录 bind 到 /root，会遮住镜像内 /root/.local/bin；复制 uv 到 PATH 固定位置
+# （集群 apptainer run -B fakeroot:/root 时，entrypoint 的 `uv pip install -e .` 仍可用）。
+RUN cp /root/.local/bin/uv /usr/local/bin/uv && chmod +x /usr/local/bin/uv
 # Alternative (faster, always latest):
 # COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
@@ -41,6 +44,16 @@ ENV PATH="/root/.local/bin:$PATH"
 RUN uv venv --python 3.10 /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV VIRTUAL_ENV="/opt/venv"
+# uv 把 Python 装在 /root/.local/share/uv/python/...；bind /root 时软链接失效。
+# 复制到 /opt/python310 并重链，保证任何 bind 场景下 venv Python 可用。
+RUN _py=$(find /root/.local/share/uv/python -maxdepth 3 -name 'python3.10' -type f 2>/dev/null | head -1) && \
+    if [ -n "$_py" ]; then \
+        _dir=$(dirname "$(dirname "$_py")") && \
+        cp -a "$_dir" /opt/python310 && \
+        ln -sf /opt/python310/bin/python3.10 /opt/venv/bin/python && \
+        ln -sf /opt/python310/bin/python3.10 /opt/venv/bin/python3 && \
+        ln -sf /opt/python310/bin/python3.10 /opt/venv/bin/python3.10; \
+    fi
 
 
 
@@ -89,9 +102,30 @@ RUN mkdir -p /opt/third_party && git clone https://github.com/ARISE-Initiative/r
 # <<<EXTENSION_INSERT_ABOVE>>>
 
 # -----------------------------------------------------------------------------
-# 7. Workspace (project source mounted at runtime, not copied)
+# 7. Bake robocasa source + kitchen assets into the image (self-contained)
+# -----------------------------------------------------------------------------
+# 与上游「源码运行时 bind」不同：为了把 ~8GB 厨房素材(inode 大户)封进 .sif（squashfs
+# 单文件 = 1 inode），这里把源码连同 robocasa/models/assets 一并 COPY 进镜像并就地
+# editable 安装。集群 apptainer run 时 **不要** bind /workspace/robocasa（否则会遮住烤入的
+# assets）。改 robocasa 代码需重 build。本地 docker-compose 若仍 bind 源码则退回运行时下载（兼容）。
+COPY . /workspace/robocasa
+RUN cd /workspace/robocasa && uv pip install -e . --index-strategy unsafe-best-match
+RUN cd /workspace/robocasa && python scripts/setup_macros.py 2>/dev/null || true
+# assets：构建上下文已含(host 下载过)则原样烤入；否则 build 时下载（reproducible 兜底）。
+RUN _assets=/workspace/robocasa/robocasa/models/assets && \
+    if [ -d "$_assets/textures" ] && [ -n "$(ls -A "$_assets/textures" 2>/dev/null)" ]; then \
+        echo ">> kitchen assets present in build context, baked as-is"; \
+    else \
+        echo ">> downloading kitchen assets at build time (~5GB)..." && \
+        yes | python /workspace/robocasa/robocasa/scripts/download_kitchen_assets.py; \
+    fi
+
+# -----------------------------------------------------------------------------
+# 8. Workspace + entrypoint
 # -----------------------------------------------------------------------------
 WORKDIR /workspace/robocasa
+# headless EGL 离屏渲染(robosuite/mujoco)，run_eval 仿真必需。
+ENV MUJOCO_GL=egl
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

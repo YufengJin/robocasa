@@ -434,7 +434,7 @@ name = "nvidia-cudnn-cu11"
 version = "9.1.0.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu11" },
+    { name = "nvidia-cublas-cu11", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/00/3b/0b776f04e364cd99e4cf152c2a9eadb5934c67c9a91429da55169a9447fd/nvidia_cudnn_cu11-9.1.0.70-py3-none-manylinux2014_x86_64.whl", hash = "sha256:e6135ac63fe9d5b0b89cfb35c3fc1c1349f2b995becadf2e9dc21bca89d9633d", size = 663919573, upload-time = "2024-04-22T15:20:24.839Z" },
@@ -463,7 +463,7 @@ name = "nvidia-cusolver-cu11"
 version = "11.4.1.48"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu11" },
+    { name = "nvidia-cublas-cu11", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/ee/939ff0104991dd7bdabb4c9767994c612ba0e1c9a55672a1ddd42f5e5b16/nvidia_cusolver_cu11-11.4.1.48-py3-none-manylinux1_x86_64.whl", hash = "sha256:ca538f545645b7e6629140786d3127fe067b3d5a085bd794cde5bfe877c8926f", size = 128240842, upload-time = "2022-10-03T23:30:24.348Z" },
@@ -544,7 +544,7 @@ wheels = [
 [[package]]
 name = "policy-websocket"
 version = "0.1.0"
-source = { git = "https://github.com/YufengJin/policy_websocket.git#37383ebddbbef5576de8d544f41a5ac9941ee178" }
+source = { git = "https://github.com/YufengJin/policy_websocket.git?rev=main#22f6a1b714b222962341fb802a7cdcb09175f657" }
 dependencies = [
     { name = "msgpack" },
     { name = "numpy" },
@@ -750,7 +750,7 @@ requires-dist = [
     { name = "numpy", specifier = "==1.23.3" },
     { name = "opencv-python" },
     { name = "pillow" },
-    { name = "policy-websocket", git = "https://github.com/YufengJin/policy_websocket.git" },
+    { name = "policy-websocket", git = "https://github.com/YufengJin/policy_websocket.git?rev=main" },
     { name = "pygame" },
     { name = "pynput" },
     { name = "pyyaml" },
@@ -893,8 +893,8 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.4.0%2Bcu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:80f75f98282dfcca50a013ce14ee6a4385680e1c15cb0e9b376612442137ead5" },
-    { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.4.0%2Bcu118-cp310-cp310-win_amd64.whl", hash = "sha256:29171e87e819c5fecc215873aa1cb726e62a269610de62112d9ef0b1f945dace" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.4.0%2Bcu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:80f75f98282dfcca50a013ce14ee6a4385680e1c15cb0e9b376612442137ead5", upload-time = "2024-07-24T22:47:24Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.4.0%2Bcu118-cp310-cp310-win_amd64.whl", hash = "sha256:29171e87e819c5fecc215873aa1cb726e62a269610de62112d9ef0b1f945dace", upload-time = "2024-07-24T22:47:59Z" },
 ]
 
 [[package]]
@@ -905,8 +905,8 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/cu118/torchaudio-2.4.0%2Bcu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:d0cfc2c1ca93fe6c64223fc751d95845e0029983206c1698201ec96ca73f9e97" },
-    { url = "https://download-r2.pytorch.org/whl/cu118/torchaudio-2.4.0%2Bcu118-cp310-cp310-win_amd64.whl", hash = "sha256:475252814036344ddef4c0da9702e438b7998e98c3aa1774a7f4349b64d481f2" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torchaudio-2.4.0%2Bcu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:d0cfc2c1ca93fe6c64223fc751d95845e0029983206c1698201ec96ca73f9e97", upload-time = "2024-07-24T23:00:02Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torchaudio-2.4.0%2Bcu118-cp310-cp310-win_amd64.whl", hash = "sha256:475252814036344ddef4c0da9702e438b7998e98c3aa1774a7f4349b64d481f2", upload-time = "2024-07-24T23:00:02Z" },
 ]
 
 [[package]]
@@ -919,8 +919,8 @@ dependencies = [
     { name = "torch" },
 ]
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/cu118/torchvision-0.19.0%2Bcu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:120cee8ca4688a287fcaae69fcc4284b48c04ef8cc7a53461200d8c047ffe998" },
-    { url = "https://download-r2.pytorch.org/whl/cu118/torchvision-0.19.0%2Bcu118-cp310-cp310-win_amd64.whl", hash = "sha256:1df164a998dd52ee9f3c43aede7a7e05b25914da4c502b317045a4c755d4a13e" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torchvision-0.19.0%2Bcu118-cp310-cp310-linux_x86_64.whl", hash = "sha256:120cee8ca4688a287fcaae69fcc4284b48c04ef8cc7a53461200d8c047ffe998", upload-time = "2024-07-24T23:00:07Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torchvision-0.19.0%2Bcu118-cp310-cp310-win_amd64.whl", hash = "sha256:1df164a998dd52ee9f3c43aede7a7e05b25914da4c502b317045a4c755d4a13e", upload-time = "2024-07-24T23:00:07Z" },
 ]
 
 [[package]]
@@ -940,7 +940,7 @@ name = "triton"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock" },
+    { name = "filelock", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/27/14cc3101409b9b4b9241d2ba7deaa93535a217a211c86c4cc7151fb12181/triton-3.0.0-1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e1efef76935b2febc365bfadf74bcb65a6f959a9872e5bddf44cc9e0adce1e1a", size = 209376304, upload-time = "2024-07-19T20:56:41.483Z" },
