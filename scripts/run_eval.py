@@ -15,6 +15,7 @@ Usage:
 import argparse
 import atexit
 import gc
+import json
 import os
 import signal
 import sys
@@ -211,6 +212,20 @@ def run_task(args, policy, log_file=None):
     log(f"Total episodes:   {len(successes)}", log_file)
     log(f"Total successes:  {sum(successes)}", log_file)
     log("=" * 60, log_file)
+
+    # 机器可读结果（供 eval->wandb 回写用，见 droid_policy_learning/slurm/eval_app.slurm）
+    results = {
+        "benchmark": "robocasa",
+        "task": str(args.task_name),
+        "num_episodes": int(len(successes)),
+        "num_success": int(sum(successes)),
+        "success_rate": float(success_rate),
+        "avg_ep_length": float(avg_length),
+    }
+    results_path = os.path.join(args.log_dir, "results.json")
+    with open(results_path, "w") as rf:
+        json.dump(results, rf, indent=2)
+    log(f"Results JSON: {results_path}", log_file)
     return success_rate
 
 
