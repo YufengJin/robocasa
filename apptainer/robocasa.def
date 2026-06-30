@@ -1,0 +1,123 @@
+Bootstrap: docker
+From: nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu20.04
+
+# =============================================================================
+# 原生 Apptainer 构建（无需 Docker），与 docker/Dockerfile 对齐。
+# Python3.10(uv) + robosuite v1.5.2；源码 + ~8GB 厨房素材烤入镜像 → 集群上不 bind 源码。
+#
+# 构建（在 robocasa 仓库根目录执行；输出到仓库外，避免 %files 把 .sif 自拷贝）：
+#   apptainer build --fakeroot $WORK/sif/robocasa.sif apptainer/robocasa.def
+#
+# 无外网的计算节点需设代理（FAU NHR HPC3）：
+#   export http_proxy=http://proxy:80 https_proxy=http://proxy:80
+#   export APPTAINERENV_http_proxy=$http_proxy APPTAINERENV_https_proxy=$https_proxy
+#
+# 无 subuid 映射的集群，--fakeroot 无法伪造 dpkg postinst 的 chown，apt 会失败 →
+# 需用 proot 构建（见 apptainer/README.md）或由管理员配置 /etc/subuid。
+# =============================================================================
+
+%files
+    # 整仓库烤入（含 robocasa/models/assets 厨房素材）；路径相对于 build 时的 cwd（仓库根）。
+    . /workspace/robocasa
+
+%labels
+    Author VLA_Dev
+    Version 1.0
+    Description RoboCasa sim client (uv + robosuite v1.5.2, aligned with docker/Dockerfile)
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PATH="/opt/venv/bin:/usr/local/bin:/root/.local/bin:/usr/bin:/bin"
+    export VIRTUAL_ENV="/opt/venv"
+    export UV_LINK_MODE=copy
+    export UV_PROJECT_ENVIRONMENT=/opt/venv
+    export HOME=/root
+    export HF_HOME=/root/.cache/huggingface
+    # headless EGL 离屏渲染（run_eval 默认；run_eval.sh 在运行时会覆盖为 osmesa）。
+    export MUJOCO_GL=egl
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    # 与 docker/Dockerfile 一致：把 uv sync / uv pip 都钉到 /opt/venv。
+    export UV_LINK_MODE=copy
+    export UV_PROJECT_ENVIRONMENT=/opt/venv
+
+    # 1. System dependencies（与 docker/Dockerfile 一致）
+    # 无特权构建：禁止 apt 降权到 _apt 用户（单 UID namespace 下 setgroups/seteuid 会失败，
+    # 否则 "Method http has died"）。
+    echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/00no-sandbox
+    apt-get update -y
+    apt-get install -y \
+        curl wget tar procps bzip2 ca-certificates git build-essential cmake unzip \
+        ffmpeg libgl1 libgl1-mesa-glx libglib2.0-0 \
+        libx11-6 libxext6 libxrender1 libsm6 libegl1 libosmesa6 \
+        lsof psmisc tmux vim x11-apps
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+    # 2. uv（与 docker/Dockerfile 一致）
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="/root/.local/bin:${PATH}"
+    # bind /root 时 /root/.local/bin 会被遮住 → 复制 uv 到固定 PATH 位置。
+    cp /root/.local/bin/uv /usr/local/bin/uv && chmod +x /usr/local/bin/uv
+
+    # 3. Python 3.10 venv（复制解释器到 /opt/python310 并重链，脱离 /root 依赖）
+    uv venv --python 3.10 /opt/venv
+    export PATH="/opt/venv/bin:${PATH}"
+    export VIRTUAL_ENV="/opt/venv"
+    _uv_py=$(find /root/.local/share/uv/python -maxdepth 3 -name 'python3.10' -type f 2>/dev/null | head -1)
+    if [ -n "$_uv_py" ]; then
+        _uv_dir=$(dirname "$(dirname "$_uv_py")")
+        cp -a "$_uv_dir" /opt/python310
+        ln -sf /opt/python310/bin/python3.10 /opt/venv/bin/python
+        ln -sf /opt/python310/bin/python3.10 /opt/venv/bin/python3
+        ln -sf /opt/python310/bin/python3.10 /opt/venv/bin/python3.10
+    fi
+
+    # 4. 锁定依赖栈（uv sync；从烤入源码读 pyproject.toml/uv.lock，钉到 /opt/venv）
+    cd /workspace/robocasa
+    uv sync --frozen --no-install-project
+
+    # 5. robosuite v1.5.2（editable，与 docker/Dockerfile 一致）
+    mkdir -p /opt/third_party
+    git clone https://github.com/ARISE-Initiative/robosuite.git /opt/third_party/robosuite
+    cd /opt/third_party/robosuite && git checkout v1.5.2
+    uv pip install -e . --index-strategy unsafe-best-match
+
+    # 6. robocasa editable + 私有 macros
+    cd /workspace/robocasa
+    uv pip install -e . --index-strategy unsafe-best-match
+    python scripts/setup_macros.py 2>/dev/null || true
+
+    # 7. 厨房素材：构建上下文已含(host 下载过)则原样烤入；否则 build 时下载(~5GB，需外网/代理)
+    _assets=/workspace/robocasa/robocasa/models/assets
+    if [ -d "$_assets/textures" ] && [ -n "$(ls -A "$_assets/textures" 2>/dev/null)" ]; then
+        echo ">> kitchen assets present in build context, baked as-is"
+    else
+        echo ">> downloading kitchen assets at build time (~5GB)..."
+        yes | python /workspace/robocasa/robocasa/scripts/download_kitchen_assets.py
+    fi
+
+    # 8. 运行时入口（与 docker/Dockerfile 一致：entrypoint 负责 editable 重装 + 资产检查）
+    cp /workspace/robocasa/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+    chmod +x /usr/local/bin/entrypoint.sh
+
+    mkdir -p /root/.cache/huggingface
+
+%runscript
+    export PATH="/opt/venv/bin:/usr/local/bin:/root/.local/bin:${PATH:-/usr/bin:/bin}"
+    export VIRTUAL_ENV="/opt/venv"
+    if [ "$#" -eq 0 ]; then
+        set -- /bin/bash
+    fi
+    exec /usr/local/bin/entrypoint.sh "$@"
+
+%help
+    原生 Apptainer 构建（无需 Docker），与 docker/Dockerfile 对齐。
+    源码 + ~8GB 厨房素材烤入；Python3.10(uv) + robosuite v1.5.2。
+    构建：apptainer build --fakeroot <out>/robocasa.sif apptainer/robocasa.def
+    运行：见 apptainer/run_eval.sh（--writable-tmpfs, MUJOCO_GL=osmesa, --log_dir /tmp/...）。
